@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1769039873890,
+      "tag": "0000_abandoned_deadpool",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1769040029121,
+      "tag": "0001_cloudy_redwing",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1769045008880,
+      "tag": "0002_chubby_vengeance",
+      "breakpoints": true
+    }
+  ]
+}
