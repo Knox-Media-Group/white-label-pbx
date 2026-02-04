@@ -13,19 +13,39 @@ import { nanoid } from "nanoid";
 
 export const webhookRouter = Router();
 
-// Middleware to parse URL-encoded bodies (SignalWire sends form data)
-webhookRouter.use((req, res, next) => {
-  if (req.headers['content-type']?.includes('application/x-www-form-urlencoded')) {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      req.body = Object.fromEntries(new URLSearchParams(body));
-      next();
-    });
-  } else {
-    next();
+// Note: Body parsing is handled by express.urlencoded() in index.ts
+// No additional middleware needed here
+
+// Helper to parse JSON fields that may come as string or already parsed
+function parseJsonArray(value: unknown): number[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
-});
+  return [];
+}
+
+// Get the correct SIP domain for SignalWire
+// Format: {space}-{last_part_of_project_id}.sip.signalwire.com
+function getSipDomain(): string {
+  const spaceUrl = process.env.SIGNALWIRE_SPACE_URL || '';
+  const projectId = process.env.SIGNALWIRE_PROJECT_ID || '';
+
+  // Extract space name from URL (e.g., "knoxlandin" from "knoxlandin.signalwire.com")
+  const spaceName = spaceUrl.replace('.signalwire.com', '');
+
+  // Get the last segment of the project ID for the SIP domain
+  const projectIdParts = projectId.split('-');
+  const lastPart = projectIdParts[projectIdParts.length - 1];
+
+  return `${spaceName}-${lastPart}.sip.signalwire.com`;
+}
 
 /**
  * Main voice webhook - handles incoming calls
@@ -107,7 +127,7 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
       if (phoneNumber.assignedToEndpointId) {
         const endpoint = await db.getSipEndpointById(phoneNumber.assignedToEndpointId);
         if (endpoint) {
-          const sipAddress = `sip:${endpoint.username}@${process.env.SIGNALWIRE_SPACE_URL}`;
+          const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
           laml = generateLamlDial(sipAddress, { timeout: 30 });
         } else {
           laml = generateLamlVoicemail();
@@ -115,11 +135,11 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
       } else if (phoneNumber.assignedToRingGroupId) {
         const ringGroup = await db.getRingGroupById(phoneNumber.assignedToRingGroupId);
         if (ringGroup) {
-          const memberIds = ringGroup.memberEndpointIds as number[] || [];
+          const memberIds = parseJsonArray(ringGroup.memberEndpointIds);
           const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
           const sipAddresses = endpoints
             .filter(e => e && e.status === 'active')
-            .map(e => `sip:${e!.username}@${process.env.SIGNALWIRE_SPACE_URL}`);
+            .map(e => `sip:${e!.username}@${getSipDomain()}`);
           
           if (sipAddresses.length > 0) {
             laml = generateLamlRingGroup(sipAddresses, {
@@ -142,7 +162,7 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
           if (matchedRoute.destinationId) {
             const endpoint = await db.getSipEndpointById(matchedRoute.destinationId);
             if (endpoint) {
-              const sipAddress = `sip:${endpoint.username}@${process.env.SIGNALWIRE_SPACE_URL}`;
+              const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
               laml = generateLamlDial(sipAddress, { timeout: 30 });
             } else {
               laml = generateLamlVoicemail();
@@ -156,11 +176,11 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
           if (matchedRoute.destinationId) {
             const ringGroup = await db.getRingGroupById(matchedRoute.destinationId);
             if (ringGroup) {
-              const memberIds = ringGroup.memberEndpointIds as number[] || [];
+              const memberIds = parseJsonArray(ringGroup.memberEndpointIds);
               const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
               const sipAddresses = endpoints
                 .filter(e => e && e.status === 'active')
-                .map(e => `sip:${e!.username}@${process.env.SIGNALWIRE_SPACE_URL}`);
+                .map(e => `sip:${e!.username}@${getSipDomain()}`);
               
               if (sipAddresses.length > 0) {
                 laml = generateLamlRingGroup(sipAddresses, {
@@ -470,11 +490,11 @@ webhookRouter.post("/ai-gather", async (req: Request, res: Response) => {
         // Get ring group members
         const group = await db.getRingGroupById(ringGroup.ringGroupId);
         if (group) {
-          const memberIds = group.memberEndpointIds as number[] || [];
+          const memberIds = parseJsonArray(group.memberEndpointIds);
           const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
           const sipAddresses = endpoints
             .filter(e => e && e.status === 'active')
-            .map(e => `sip:${e!.username}@${process.env.SIGNALWIRE_SPACE_URL}`);
+            .map(e => `sip:${e!.username}@${getSipDomain()}`);
           
           if (sipAddresses.length > 0) {
             const laml = aiIvr.generateTransferToRingGroupLaml(sipAddresses, {
@@ -494,7 +514,7 @@ webhookRouter.post("/ai-gather", async (req: Request, res: Response) => {
       const endpoint = await aiIvr.findDepartmentEndpoint(customerId, intent.department);
       
       if (endpoint) {
-        const sipAddress = `sip:${endpoint.username}@${process.env.SIGNALWIRE_SPACE_URL}`;
+        const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
         const laml = aiIvr.generateTransferToEndpointLaml(sipAddress, {
           timeout: 30,
           announcement: `Transferring you to ${endpoint.displayName || endpoint.username} now.`,
@@ -556,11 +576,11 @@ webhookRouter.post("/ai-fallback", async (req: Request, res: Response) => {
     ) || ringGroups.find(g => g.status === 'active');
 
     if (defaultGroup) {
-      const memberIds = defaultGroup.memberEndpointIds as number[] || [];
+      const memberIds = parseJsonArray(defaultGroup.memberEndpointIds);
       const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
       const sipAddresses = endpoints
         .filter(e => e && e.status === 'active')
-        .map(e => `sip:${e!.username}@${process.env.SIGNALWIRE_SPACE_URL}`);
+        .map(e => `sip:${e!.username}@${getSipDomain()}`);
       
       if (sipAddresses.length > 0) {
         const laml = aiIvr.generateTransferToRingGroupLaml(sipAddresses, {
@@ -579,7 +599,7 @@ webhookRouter.post("/ai-fallback", async (req: Request, res: Response) => {
     const activeEndpoint = endpoints.find(e => e.status === 'active');
     
     if (activeEndpoint) {
-      const sipAddress = `sip:${activeEndpoint.username}@${process.env.SIGNALWIRE_SPACE_URL}`;
+      const sipAddress = `sip:${activeEndpoint.username}@${getSipDomain()}`;
       const laml = aiIvr.generateTransferToEndpointLaml(sipAddress, {
         timeout: 30,
         announcement: "Please hold while I connect you.",
@@ -679,11 +699,27 @@ webhookRouter.post("/swaig-transfer", async (req: Request, res: Response) => {
       
       console.log(`[SWAIG Transfer] Matched department: ${matchedDepartment.name} -> ${sipAddress}`);
       
-      // Use back_to_back_functions: false and stop to let the Call Flow Builder continue
+      // Return SWML with connect action to actually transfer the call
+      // The AI Agent says the response, then SWML executes the transfer
       const response = {
         response: `Transferring you to ${matchedDepartment.name} now. Please hold while I connect you.`,
         action: [
           { back_to_back_functions: false },
+          {
+            SWML: {
+              sections: {
+                main: [
+                  {
+                    connect: {
+                      from: meta_data?.from || undefined,
+                      headers: {},
+                      to: sipAddress
+                    }
+                  }
+                ]
+              }
+            }
+          },
           { stop: true }
         ]
       };
@@ -702,18 +738,25 @@ webhookRouter.post("/swaig-transfer", async (req: Request, res: Response) => {
     
   } catch (error) {
     console.error("[SWAIG Transfer] Error:", error);
+    const sipDomain = 'knoxlandin-526db06c4f67.sip.signalwire.com';
     res.json({
-      response: "I'm sorry, I encountered an error. Let me connect you to sales.",
+      response: "I'm sorry, I encountered an error. Let me connect you to our main line.",
       action: [
+        { back_to_back_functions: false },
         {
           SWML: {
             sections: {
               main: [
-                { send_digits: "1" }
+                {
+                  connect: {
+                    to: `sip:knox_101@${sipDomain}`
+                  }
+                }
               ]
             }
           }
-        }
+        },
+        { stop: true }
       ]
     });
   }
