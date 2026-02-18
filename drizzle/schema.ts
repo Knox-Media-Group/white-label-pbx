@@ -30,10 +30,23 @@ export const customers = mysqlTable("customers", {
   email: varchar("email", { length: 320 }).notNull(),
   phone: varchar("phone", { length: 32 }),
   status: mysqlEnum("status", ["active", "suspended", "pending", "cancelled"]).default("pending").notNull(),
-  // SignalWire subproject integration
+  // SignalWire subproject integration (legacy)
   signalwireSubprojectSid: varchar("signalwireSubprojectSid", { length: 64 }),
   signalwireApiToken: text("signalwireApiToken"),
   signalwireSpaceUrl: varchar("signalwireSpaceUrl", { length: 255 }),
+  // Telnyx integration
+  telnyxConnectionId: varchar("telnyxConnectionId", { length: 64 }),
+  telnyxCredentialConnectionId: varchar("telnyxCredentialConnectionId", { length: 64 }),
+  telnyxTexmlAppId: varchar("telnyxTexmlAppId", { length: 64 }),
+  telnyxOutboundProfileId: varchar("telnyxOutboundProfileId", { length: 64 }),
+  telnyxSipDomain: varchar("telnyxSipDomain", { length: 255 }),
+  // Retell AI integration
+  retellAgentId: varchar("retellAgentId", { length: 64 }),
+  retellLlmId: varchar("retellLlmId", { length: 64 }),
+  retellGreeting: text("retellGreeting"),
+  retellEnabled: boolean("retellEnabled").default(false),
+  // Telephony provider preference
+  telephonyProvider: mysqlEnum("telephonyProvider", ["signalwire", "telnyx"]).default("telnyx"),
   // Branding settings
   brandingLogo: text("brandingLogo"), // S3 URL
   brandingPrimaryColor: varchar("brandingPrimaryColor", { length: 7 }).default("#6366f1"),
@@ -54,17 +67,23 @@ export type InsertCustomer = typeof customers.$inferInsert;
 
 /**
  * SIP Endpoints - managed per customer
+ * Supports both SignalWire and Telnyx credential connections
  */
 export const sipEndpoints = mysqlTable("sipEndpoints", {
   id: int("id").autoincrement().primaryKey(),
   customerId: int("customerId").notNull(),
   signalwireEndpointId: varchar("signalwireEndpointId", { length: 64 }),
+  telnyxCredentialConnectionId: varchar("telnyxCredentialConnectionId", { length: 64 }),
+  telnyxSipUsername: varchar("telnyxSipUsername", { length: 128 }),
   username: varchar("username", { length: 64 }).notNull(),
   password: text("password"),
   callerId: varchar("callerId", { length: 64 }),
   sendAs: varchar("sendAs", { length: 32 }),
   displayName: varchar("displayName", { length: 128 }),
   extensionNumber: varchar("extensionNumber", { length: 16 }),
+  // VoIP phone details
+  phoneModel: varchar("phoneModel", { length: 128 }),
+  macAddress: varchar("macAddress", { length: 17 }),
   status: mysqlEnum("status", ["active", "inactive", "provisioning"]).default("provisioning").notNull(),
   // Call handler configuration
   callHandler: mysqlEnum("callHandler", ["laml_webhooks", "relay_context", "relay_topic", "ai_agent", "video_room"]).default("laml_webhooks"),
@@ -72,6 +91,8 @@ export const sipEndpoints = mysqlTable("sipEndpoints", {
   callRequestMethod: mysqlEnum("callRequestMethod", ["GET", "POST"]).default("POST"),
   callRelayContext: varchar("callRelayContext", { length: 64 }),
   callAiAgentId: varchar("callAiAgentId", { length: 64 }),
+  // Provider tracking
+  provider: mysqlEnum("provider", ["signalwire", "telnyx"]).default("telnyx"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -81,11 +102,16 @@ export type InsertSipEndpoint = typeof sipEndpoints.$inferInsert;
 
 /**
  * Phone Numbers - provisioned and assigned per customer
+ * Supports SignalWire, Telnyx, and Retell AI managed numbers
  */
 export const phoneNumbers = mysqlTable("phoneNumbers", {
   id: int("id").autoincrement().primaryKey(),
   customerId: int("customerId").notNull(),
   signalwirePhoneNumberSid: varchar("signalwirePhoneNumberSid", { length: 64 }),
+  telnyxPhoneNumberId: varchar("telnyxPhoneNumberId", { length: 64 }),
+  telnyxConnectionId: varchar("telnyxConnectionId", { length: 64 }),
+  retellPhoneNumberId: varchar("retellPhoneNumberId", { length: 64 }),
+  retellAgentId: varchar("retellAgentId", { length: 64 }),
   phoneNumber: varchar("phoneNumber", { length: 32 }).notNull(),
   friendlyName: varchar("friendlyName", { length: 128 }),
   voiceEnabled: boolean("voiceEnabled").default(true),
@@ -95,10 +121,16 @@ export const phoneNumbers = mysqlTable("phoneNumbers", {
   assignedToEndpointId: int("assignedToEndpointId"),
   assignedToRingGroupId: int("assignedToRingGroupId"),
   // Call handler
-  callHandler: mysqlEnum("callHandler", ["laml_webhooks", "relay_context", "relay_topic", "ai_agent", "sip_endpoint", "ring_group"]).default("laml_webhooks"),
+  callHandler: mysqlEnum("callHandler", ["laml_webhooks", "relay_context", "relay_topic", "ai_agent", "sip_endpoint", "ring_group", "retell_agent"]).default("laml_webhooks"),
   callRequestUrl: text("callRequestUrl"),
   callRelayContext: varchar("callRelayContext", { length: 64 }),
   status: mysqlEnum("status", ["active", "inactive", "porting"]).default("active").notNull(),
+  // Number porting tracking
+  portOrderId: varchar("portOrderId", { length: 64 }),
+  portedFrom: varchar("portedFrom", { length: 64 }),
+  portCompletedAt: timestamp("portCompletedAt"),
+  // Provider tracking
+  provider: mysqlEnum("provider", ["signalwire", "telnyx"]).default("telnyx"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -275,3 +307,94 @@ export const retentionPolicies = mysqlTable("retentionPolicies", {
 
 export type RetentionPolicy = typeof retentionPolicies.$inferSelect;
 export type InsertRetentionPolicy = typeof retentionPolicies.$inferInsert;
+
+/**
+ * Retell AI Agents - AI receptionist configurations per customer
+ */
+export const retellAgents = mysqlTable("retellAgents", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull(),
+  retellAgentId: varchar("retellAgentId", { length: 64 }).notNull(),
+  retellLlmId: varchar("retellLlmId", { length: 64 }),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  greeting: text("greeting"),
+  voiceId: varchar("voiceId", { length: 64 }),
+  language: varchar("language", { length: 16 }).default("en-US"),
+  // Department transfer configuration
+  departments: json("departments"), // Array of { name, description, transferNumber }
+  // Post-call analysis
+  enablePostCallAnalysis: boolean("enablePostCallAnalysis").default(true),
+  enableVoicemailDetection: boolean("enableVoicemailDetection").default(true),
+  voicemailMessage: text("voicemailMessage"),
+  maxCallDurationMs: int("maxCallDurationMs").default(600000),
+  status: mysqlEnum("status", ["active", "inactive", "configuring"]).default("configuring").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type RetellAgent = typeof retellAgents.$inferSelect;
+export type InsertRetellAgent = typeof retellAgents.$inferInsert;
+
+/**
+ * VoIP Phones - physical desk phone inventory and configuration
+ */
+export const voipPhones = mysqlTable("voipPhones", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull(),
+  sipEndpointId: int("sipEndpointId"),
+  // Phone hardware details
+  brand: varchar("brand", { length: 64 }),
+  model: varchar("model", { length: 64 }),
+  macAddress: varchar("macAddress", { length: 17 }),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  firmwareVersion: varchar("firmwareVersion", { length: 32 }),
+  // SIP registration config
+  sipServer: varchar("sipServer", { length: 255 }),
+  sipUsername: varchar("sipUsername", { length: 64 }),
+  sipPort: int("sipPort").default(5060),
+  transport: mysqlEnum("transport", ["UDP", "TCP", "TLS"]).default("UDP"),
+  // Location / label
+  label: varchar("label", { length: 128 }),
+  location: varchar("location", { length: 128 }),
+  // Provisioning
+  provisioningUrl: text("provisioningUrl"),
+  lastRegisteredAt: timestamp("lastRegisteredAt"),
+  status: mysqlEnum("status", ["online", "offline", "provisioning", "error"]).default("provisioning").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VoipPhone = typeof voipPhones.$inferSelect;
+export type InsertVoipPhone = typeof voipPhones.$inferInsert;
+
+/**
+ * Number Port Orders - tracking number transfers from Viirtue/other carriers
+ */
+export const portOrders = mysqlTable("portOrders", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull(),
+  telnyxPortOrderId: varchar("telnyxPortOrderId", { length: 64 }),
+  // Numbers being ported
+  phoneNumbers: json("phoneNumbers"), // Array of E.164 formatted numbers
+  // Porting details
+  currentCarrier: varchar("currentCarrier", { length: 128 }),
+  accountNumber: varchar("accountNumber", { length: 64 }),
+  authorizedName: varchar("authorizedName", { length: 128 }),
+  // Service address
+  streetAddress: varchar("streetAddress", { length: 255 }),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  postalCode: varchar("postalCode", { length: 16 }),
+  country: varchar("country", { length: 2 }).default("US"),
+  // Status tracking
+  status: mysqlEnum("status", ["draft", "submitted", "in_progress", "completed", "failed", "cancelled"]).default("draft").notNull(),
+  focDate: timestamp("focDate"),
+  completedAt: timestamp("completedAt"),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PortOrder = typeof portOrders.$inferSelect;
+export type InsertPortOrder = typeof portOrders.$inferInsert;

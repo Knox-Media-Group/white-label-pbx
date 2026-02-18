@@ -6,6 +6,8 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { webhookRouter } from "../webhooks";
+import { telnyxWebhookRouter } from "../telnyx-webhooks";
+import { retellWebhookRouter } from "../retell-webhooks";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -36,8 +38,12 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
-  // SignalWire webhooks
+  // SignalWire webhooks (legacy)
   app.use("/api/webhooks", webhookRouter);
+  // Telnyx webhooks
+  app.use("/api/webhooks/telnyx", telnyxWebhookRouter);
+  // Retell AI webhooks
+  app.use("/api/webhooks/retell", retellWebhookRouter);
   // tRPC API
   app.use(
     "/api/trpc",

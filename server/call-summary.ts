@@ -6,6 +6,7 @@
 
 import { invokeLLM } from "./_core/llm";
 import * as signalwire from "./signalwire";
+import * as telnyxApi from "./telnyx";
 import * as db from "./db";
 
 export interface CallSummaryInput {
@@ -231,12 +232,25 @@ export async function sendCallSummarySms(input: CallSummaryInput): Promise<{
       duration: input.duration,
     });
 
-    // Send the SMS
-    const result = await signalwire.sendSms({
-      from: senderNumber,
-      to: recipientNumber,
-      body: smsText,
-    });
+    // Send the SMS via the customer's configured provider
+    const customer2 = await db.getCustomerById(input.customerId);
+    const provider = customer2?.telephonyProvider || 'telnyx';
+
+    let result: { sid?: string; data?: { id?: string } };
+    if (provider === 'telnyx' && telnyxApi.isConfigured()) {
+      const telnyxResult = await telnyxApi.sendSms({
+        from: senderNumber,
+        to: recipientNumber,
+        body: smsText,
+      });
+      result = { sid: telnyxResult.data?.id };
+    } else {
+      result = await signalwire.sendSms({
+        from: senderNumber,
+        to: recipientNumber,
+        body: smsText,
+      });
+    }
 
     // Store the summary in the database
     // Find the recording by callSid and update it

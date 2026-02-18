@@ -8,6 +8,8 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
 import * as signalwire from "./signalwire";
+import * as telnyxApi from "./telnyx";
+import * as retellApi from "./retell";
 
 // Admin-only procedure
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -833,10 +835,580 @@ Example output:
         const summaryContent = llmResponse.choices[0]?.message?.content;
         const summary = typeof summaryContent === 'string' ? summaryContent : '';
         await db.updateCallRecording(input.recordingId, { summary });
-        
+
         return { summary };
       }),
   }),
+
+  // ============ TELNYX API ============
+  telnyxApi: router({
+    status: adminProcedure.query(async () => {
+      return telnyxApi.getCredentialsSummary();
+    }),
+
+    // SIP Connections
+    listSipConnections: adminProcedure.query(async () => {
+      return telnyxApi.listSipConnections();
+    }),
+
+    createSipConnection: adminProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        transport_protocol: z.enum(["UDP", "TCP", "TLS"]).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.createSipConnection(input);
+      }),
+
+    // Credential Connections (for VoIP phones)
+    listCredentialConnections: adminProcedure.query(async () => {
+      return telnyxApi.listCredentialConnections();
+    }),
+
+    createCredentialConnection: adminProcedure
+      .input(z.object({
+        connection_name: z.string().min(1),
+        user_name: z.string().min(1),
+        password: z.string().min(8),
+      }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.createCredentialConnection(input);
+      }),
+
+    // Phone Numbers
+    searchPhoneNumbers: adminProcedure
+      .input(z.object({
+        country_code: z.string().optional(),
+        administrative_area: z.string().optional(),
+        locality: z.string().optional(),
+        national_destination_code: z.string().optional(),
+        number_type: z.enum(["local", "toll_free", "national"]).optional(),
+        limit: z.number().optional(),
+      }))
+      .query(async ({ input }) => {
+        return telnyxApi.searchAvailablePhoneNumbers(input);
+      }),
+
+    listPhoneNumbers: adminProcedure.query(async () => {
+      return telnyxApi.listPhoneNumbers();
+    }),
+
+    purchasePhoneNumber: adminProcedure
+      .input(z.object({
+        phoneNumber: z.string(),
+        connectionId: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.purchasePhoneNumber(input.phoneNumber, input.connectionId);
+      }),
+
+    // TeXML Applications
+    listTexmlApplications: adminProcedure.query(async () => {
+      return telnyxApi.listTexmlApplications();
+    }),
+
+    createTexmlApplication: adminProcedure
+      .input(z.object({
+        friendly_name: z.string().min(1),
+        voice_url: z.string().url(),
+        status_callback: z.string().url().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.createTexmlApplication(input);
+      }),
+
+    // Recordings
+    listRecordings: adminProcedure.query(async () => {
+      return telnyxApi.listRecordings();
+    }),
+
+    // Outbound Voice Profiles
+    listOutboundVoiceProfiles: adminProcedure.query(async () => {
+      return telnyxApi.listOutboundVoiceProfiles();
+    }),
+  }),
+
+  // ============ RETELL AI ============
+  retellApi: router({
+    status: adminProcedure.query(async () => {
+      return retellApi.getCredentialsSummary();
+    }),
+
+    // Agents
+    listAgents: adminProcedure.query(async () => {
+      return retellApi.listAgents();
+    }),
+
+    getAgent: adminProcedure
+      .input(z.object({ agentId: z.string() }))
+      .query(async ({ input }) => {
+        return retellApi.getAgent(input.agentId);
+      }),
+
+    createReceptionistAgent: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        companyName: z.string().min(1),
+        greeting: z.string().optional(),
+        departments: z.array(z.object({
+          name: z.string(),
+          description: z.string(),
+          transferNumber: z.string(),
+        })),
+        voicemailMessage: z.string().optional(),
+        webhookUrl: z.string().url(),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await retellApi.createReceptionistAgent({
+          companyName: input.companyName,
+          greeting: input.greeting,
+          departments: input.departments,
+          voicemailMessage: input.voicemailMessage,
+          webhookUrl: input.webhookUrl,
+          customerId: input.customerId,
+        });
+
+        // Store in database
+        const agentDbId = await db.createRetellAgent({
+          customerId: input.customerId,
+          retellAgentId: result.agentId,
+          retellLlmId: result.llmId,
+          name: `${input.companyName} Receptionist`,
+          greeting: input.greeting,
+          departments: input.departments,
+          status: 'active',
+        });
+
+        // Update customer record
+        await db.updateCustomer(input.customerId, {
+          retellAgentId: result.agentId,
+          retellLlmId: result.llmId,
+          retellEnabled: true,
+        });
+
+        return { ...result, dbId: agentDbId };
+      }),
+
+    deleteAgent: adminProcedure
+      .input(z.object({ agentId: z.string() }))
+      .mutation(async ({ input }) => {
+        return retellApi.deleteAgent(input.agentId);
+      }),
+
+    // Phone Numbers
+    listPhoneNumbers: adminProcedure.query(async () => {
+      return retellApi.listPhoneNumbers();
+    }),
+
+    importPhoneNumber: adminProcedure
+      .input(z.object({
+        phoneNumber: z.string(),
+        terminationUri: z.string(),
+        agentId: z.string(),
+        nickname: z.string().optional(),
+        webhookUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return retellApi.setupNumberWithRetell({
+          phoneNumber: input.phoneNumber,
+          telnyxTerminationUri: input.terminationUri,
+          agentId: input.agentId,
+          nickname: input.nickname,
+          webhookUrl: input.webhookUrl,
+        });
+      }),
+
+    // Calls
+    listCalls: adminProcedure
+      .input(z.object({
+        limit: z.number().optional(),
+        agentId: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return retellApi.listCalls({
+          limit: input?.limit,
+          filter_criteria: input?.agentId ? { agent_id: [input.agentId] } : undefined,
+        });
+      }),
+
+    getCall: adminProcedure
+      .input(z.object({ callId: z.string() }))
+      .query(async ({ input }) => {
+        return retellApi.getCall(input.callId);
+      }),
+
+    // Make outbound call via Retell AI
+    createPhoneCall: adminProcedure
+      .input(z.object({
+        fromNumber: z.string(),
+        toNumber: z.string(),
+        agentId: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return retellApi.createPhoneCall({
+          from_number: input.fromNumber,
+          to_number: input.toNumber,
+          override_agent_id: input.agentId,
+        });
+      }),
+
+    // LLMs
+    listLlms: adminProcedure.query(async () => {
+      return retellApi.listRetellLlms();
+    }),
+
+    // Concurrency
+    getConcurrency: adminProcedure.query(async () => {
+      return retellApi.getConcurrency();
+    }),
+  }),
+
+  // ============ RETELL AGENTS (DB) ============
+  retellAgents: router({
+    list: customerProcedure
+      .input(z.object({ customerId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getRetellAgentsByCustomer(input.customerId);
+      }),
+
+    getById: customerProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getRetellAgentById(input.id);
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        greeting: z.string().optional(),
+        departments: z.array(z.object({
+          name: z.string(),
+          description: z.string(),
+          transferNumber: z.string(),
+        })).optional(),
+        status: z.enum(['active', 'inactive', 'configuring']).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        await db.updateRetellAgent(id, data);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const agent = await db.getRetellAgentById(input.id);
+        if (agent?.retellAgentId) {
+          try {
+            await retellApi.deleteAgent(agent.retellAgentId);
+          } catch (err) {
+            console.error("Failed to delete Retell agent:", err);
+          }
+        }
+        await db.deleteRetellAgent(input.id);
+        return { success: true };
+      }),
+  }),
+
+  // ============ VOIP PHONES ============
+  voipPhones: router({
+    list: customerProcedure
+      .input(z.object({ customerId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getVoipPhonesByCustomer(input.customerId);
+      }),
+
+    getById: customerProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getVoipPhoneById(input.id);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        brand: z.string().optional(),
+        model: z.string().optional(),
+        macAddress: z.string().optional(),
+        label: z.string().optional(),
+        location: z.string().optional(),
+        transport: z.enum(["UDP", "TCP", "TLS"]).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        // Create a credential connection on Telnyx for this phone
+        const sipUsername = `phone_${input.customerId}_${Date.now()}`;
+        const sipPassword = generateSipPassword();
+
+        let telnyxConnectionId: string | undefined;
+        if (telnyxApi.isConfigured()) {
+          try {
+            const connection = await telnyxApi.createCredentialConnection({
+              connection_name: `${input.label || input.brand || 'Phone'} - ${sipUsername}`,
+              user_name: sipUsername,
+              password: sipPassword,
+            });
+            telnyxConnectionId = connection.data?.id;
+          } catch (err) {
+            console.error("Failed to create Telnyx credential connection:", err);
+          }
+        }
+
+        // Create SIP endpoint in our database
+        const endpointId = await db.createSipEndpoint({
+          customerId: input.customerId,
+          username: sipUsername,
+          password: sipPassword,
+          displayName: input.label || `${input.brand || ''} ${input.model || 'Phone'}`.trim(),
+          phoneModel: input.model,
+          macAddress: input.macAddress,
+          telnyxCredentialConnectionId: telnyxConnectionId,
+          telnyxSipUsername: sipUsername,
+          provider: 'telnyx',
+          status: 'provisioning',
+        });
+
+        // Create the VoIP phone record
+        const phoneId = await db.createVoipPhone({
+          customerId: input.customerId,
+          sipEndpointId: endpointId,
+          brand: input.brand,
+          model: input.model,
+          macAddress: input.macAddress,
+          sipServer: process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com",
+          sipUsername: sipUsername,
+          sipPort: 5060,
+          transport: input.transport || "UDP",
+          label: input.label,
+          location: input.location,
+          status: 'provisioning',
+        });
+
+        return {
+          id: phoneId,
+          endpointId,
+          sipUsername,
+          sipPassword,
+          sipServer: process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com",
+          sipPort: 5060,
+        };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        label: z.string().optional(),
+        location: z.string().optional(),
+        brand: z.string().optional(),
+        model: z.string().optional(),
+        macAddress: z.string().optional(),
+        status: z.enum(["online", "offline", "provisioning", "error"]).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        await db.updateVoipPhone(id, data);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const phone = await db.getVoipPhoneById(input.id);
+        if (phone?.sipEndpointId) {
+          const endpoint = await db.getSipEndpointById(phone.sipEndpointId);
+          if (endpoint?.telnyxCredentialConnectionId && telnyxApi.isConfigured()) {
+            try {
+              await telnyxApi.deleteCredentialConnection(endpoint.telnyxCredentialConnectionId);
+            } catch (err) {
+              console.error("Failed to delete Telnyx credential connection:", err);
+            }
+          }
+          await db.deleteSipEndpoint(phone.sipEndpointId);
+        }
+        await db.deleteVoipPhone(input.id);
+        return { success: true };
+      }),
+
+    // Get provisioning config for a phone
+    getProvisioningConfig: customerProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const phone = await db.getVoipPhoneById(input.id);
+        if (!phone) throw new TRPCError({ code: 'NOT_FOUND' });
+
+        const endpoint = phone.sipEndpointId
+          ? await db.getSipEndpointById(phone.sipEndpointId)
+          : null;
+
+        return {
+          sipServer: phone.sipServer,
+          sipPort: phone.sipPort,
+          transport: phone.transport,
+          username: phone.sipUsername || endpoint?.username,
+          password: endpoint?.password,
+          // Codec preferences for VoIP phones
+          codecs: ["G.711u", "G.711a", "G.729", "Opus"],
+          // STUN server for NAT traversal
+          stunServer: "stun.telnyx.com:3478",
+        };
+      }),
+  }),
+
+  // ============ PORT ORDERS (Number Porting) ============
+  portOrders: router({
+    list: customerProcedure
+      .input(z.object({ customerId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getPortOrdersByCustomer(input.customerId);
+      }),
+
+    getById: customerProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getPortOrderById(input.id);
+      }),
+
+    // Create a number port order (Viirtue -> Telnyx)
+    create: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        phoneNumbers: z.array(z.string().min(1)),
+        currentCarrier: z.string().default("Viirtue"),
+        accountNumber: z.string().optional(),
+        authorizedName: z.string().min(1),
+        streetAddress: z.string().min(1),
+        city: z.string().min(1),
+        state: z.string().min(1),
+        postalCode: z.string().min(1),
+        country: z.string().default("US"),
+        pin: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        // Create port order in our database first
+        const orderId = await db.createPortOrder({
+          customerId: input.customerId,
+          phoneNumbers: input.phoneNumbers,
+          currentCarrier: input.currentCarrier,
+          accountNumber: input.accountNumber,
+          authorizedName: input.authorizedName,
+          streetAddress: input.streetAddress,
+          city: input.city,
+          state: input.state,
+          postalCode: input.postalCode,
+          country: input.country,
+          status: 'draft',
+        });
+
+        // Submit to Telnyx if configured
+        let telnyxPortOrderId: string | undefined;
+        if (telnyxApi.isConfigured()) {
+          try {
+            const telnyxResult = await telnyxApi.createPortOrder({
+              phone_numbers: input.phoneNumbers,
+              authorized_name: input.authorizedName,
+              service_address: {
+                street_address: input.streetAddress,
+                locality: input.city,
+                administrative_area: input.state,
+                postal_code: input.postalCode,
+                country_code: input.country,
+              },
+              current_carrier: input.currentCarrier,
+              account_number: input.accountNumber,
+              pin: input.pin,
+            });
+            telnyxPortOrderId = telnyxResult.data?.id;
+
+            await db.updatePortOrder(orderId, {
+              telnyxPortOrderId,
+              status: 'submitted',
+            });
+          } catch (err) {
+            console.error("Failed to submit port order to Telnyx:", err);
+            await db.updatePortOrder(orderId, {
+              status: 'failed',
+              errorMessage: err instanceof Error ? err.message : 'Unknown error',
+            });
+          }
+        }
+
+        // Create phone number records for each number being ported
+        for (const num of input.phoneNumbers) {
+          await db.createPhoneNumber({
+            customerId: input.customerId,
+            phoneNumber: num,
+            friendlyName: `Porting from ${input.currentCarrier}`,
+            status: 'porting',
+            portOrderId: telnyxPortOrderId || orderId.toString(),
+            portedFrom: input.currentCarrier,
+            provider: 'telnyx',
+          });
+        }
+
+        return { id: orderId, telnyxPortOrderId };
+      }),
+
+    // Check port order status
+    checkStatus: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order) throw new TRPCError({ code: 'NOT_FOUND' });
+
+        if (order.telnyxPortOrderId && telnyxApi.isConfigured()) {
+          const telnyxOrder = await telnyxApi.getPortOrder(order.telnyxPortOrderId);
+          const status = telnyxOrder.data?.status;
+
+          // Map Telnyx status to our status
+          let mappedStatus: 'draft' | 'submitted' | 'in_progress' | 'completed' | 'failed' | 'cancelled' = 'in_progress';
+          if (status === 'porting') mappedStatus = 'in_progress';
+          else if (status === 'port-complete' || status === 'completed') mappedStatus = 'completed';
+          else if (status === 'failed' || status === 'rejected') mappedStatus = 'failed';
+          else if (status === 'cancelled') mappedStatus = 'cancelled';
+          else if (status === 'pending' || status === 'submitted') mappedStatus = 'submitted';
+
+          await db.updatePortOrder(order.id, { status: mappedStatus });
+
+          // If completed, update phone number records
+          if (mappedStatus === 'completed') {
+            const numbers = Array.isArray(order.phoneNumbers) ? order.phoneNumbers as string[] : [];
+            for (const num of numbers) {
+              const phoneNum = await db.getPhoneNumberByNumber(num);
+              if (phoneNum) {
+                await db.updatePhoneNumber(phoneNum.id, {
+                  status: 'active',
+                  portCompletedAt: new Date(),
+                });
+              }
+            }
+            await db.updatePortOrder(order.id, { completedAt: new Date() });
+          }
+
+          return { status: mappedStatus, telnyxStatus: status };
+        }
+
+        return { status: order.status };
+      }),
+  }),
 });
+
+// Helper to generate a secure SIP password
+function generateSipPassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  let password = '';
+  for (let i = 0; i < 16; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
 
 export type AppRouter = typeof appRouter;

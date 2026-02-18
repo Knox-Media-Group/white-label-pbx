@@ -1,7 +1,7 @@
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { 
-  InsertUser, users, 
+import {
+  InsertUser, users,
   customers, InsertCustomer, Customer,
   sipEndpoints, InsertSipEndpoint, SipEndpoint,
   phoneNumbers, InsertPhoneNumber, PhoneNumber,
@@ -12,7 +12,10 @@ import {
   notifications, InsertNotification, Notification,
   notificationSettings, InsertNotificationSettings, NotificationSettings,
   llmCallFlows, InsertLlmCallFlow, LlmCallFlow,
-  retentionPolicies, InsertRetentionPolicy, RetentionPolicy
+  retentionPolicies, InsertRetentionPolicy, RetentionPolicy,
+  retellAgents, InsertRetellAgent, RetellAgent,
+  voipPhones, InsertVoipPhone, VoipPhone,
+  portOrders, InsertPortOrder, PortOrder,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -487,4 +490,97 @@ export async function incrementUsageStats(customerId: number, increments: {
       totalMinutes: increments.totalMinutes || 0,
     });
   }
+}
+
+// ============ RETELL AGENT OPERATIONS ============
+export async function createRetellAgent(agent: InsertRetellAgent): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(retellAgents).values(agent);
+  return result[0].insertId;
+}
+
+export async function getRetellAgentById(id: number): Promise<RetellAgent | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(retellAgents).where(eq(retellAgents.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getRetellAgentsByCustomer(customerId: number): Promise<RetellAgent[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(retellAgents).where(eq(retellAgents.customerId, customerId)).orderBy(desc(retellAgents.createdAt));
+}
+
+export async function updateRetellAgent(id: number, data: Partial<InsertRetellAgent>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(retellAgents).set(data).where(eq(retellAgents.id, id));
+}
+
+export async function deleteRetellAgent(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(retellAgents).where(eq(retellAgents.id, id));
+}
+
+// ============ VOIP PHONE OPERATIONS ============
+export async function createVoipPhone(phone: InsertVoipPhone): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(voipPhones).values(phone);
+  return result[0].insertId;
+}
+
+export async function getVoipPhoneById(id: number): Promise<VoipPhone | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(voipPhones).where(eq(voipPhones.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getVoipPhonesByCustomer(customerId: number): Promise<VoipPhone[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(voipPhones).where(eq(voipPhones.customerId, customerId)).orderBy(desc(voipPhones.createdAt));
+}
+
+export async function updateVoipPhone(id: number, data: Partial<InsertVoipPhone>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(voipPhones).set(data).where(eq(voipPhones.id, id));
+}
+
+export async function deleteVoipPhone(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(voipPhones).where(eq(voipPhones.id, id));
+}
+
+// ============ PORT ORDER OPERATIONS ============
+export async function createPortOrder(order: InsertPortOrder): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(portOrders).values(order);
+  return result[0].insertId;
+}
+
+export async function getPortOrderById(id: number): Promise<PortOrder | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(portOrders).where(eq(portOrders.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getPortOrdersByCustomer(customerId: number): Promise<PortOrder[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(portOrders).where(eq(portOrders.customerId, customerId)).orderBy(desc(portOrders.createdAt));
+}
+
+export async function updatePortOrder(id: number, data: Partial<InsertPortOrder>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(portOrders).set(data).where(eq(portOrders.id, id));
 }
