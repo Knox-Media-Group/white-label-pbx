@@ -2,12 +2,31 @@ import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import type { Express, Request, Response } from "express";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
+import { sql } from "drizzle-orm";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 import { ENV } from "./env";
 
 const scryptAsync = promisify(scrypt);
+
+// Ensure passwordHash column exists in users table
+async function ensurePasswordHashColumn(): Promise<void> {
+  const dbConn = await db.getDb();
+  if (!dbConn) return;
+  try {
+    await dbConn.execute(sql`ALTER TABLE users ADD COLUMN passwordHash TEXT NULL`);
+    console.log("[Local Auth] Added passwordHash column to users table");
+  } catch (error: any) {
+    // Column already exists — ignore the "Duplicate column" error
+    if (error?.message?.includes("Duplicate column") || error?.code === "ER_DUP_FIELDNAME") {
+      return;
+    }
+    console.warn("[Local Auth] Could not add passwordHash column:", error?.message);
+  }
+}
+
+let migrationDone = false;
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
@@ -37,6 +56,10 @@ export function registerLocalAuthRoutes(app: Express) {
   // Check if initial admin setup is needed
   app.get("/api/auth/setup-status", async (_req: Request, res: Response) => {
     try {
+      if (!migrationDone) {
+        await ensurePasswordHashColumn();
+        migrationDone = true;
+      }
       const admin = await db.getAdminUser();
       res.json({ needsSetup: !admin || !admin.passwordHash });
     } catch (error) {
@@ -48,6 +71,11 @@ export function registerLocalAuthRoutes(app: Express) {
   // Initial admin setup — create admin account with password
   app.post("/api/auth/setup", async (req: Request, res: Response) => {
     try {
+      if (!migrationDone) {
+        await ensurePasswordHashColumn();
+        migrationDone = true;
+      }
+
       // Block if OAuth is configured
       if (isOAuthConfigured()) {
         res.status(400).json({ error: "Local auth is disabled when OAuth is configured" });
