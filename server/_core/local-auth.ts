@@ -11,18 +11,21 @@ import { ENV } from "./env";
 const scryptAsync = promisify(scrypt);
 
 // Ensure passwordHash column exists in users table
-async function ensurePasswordHashColumn(): Promise<void> {
+async function ensurePasswordHashColumn(): Promise<boolean> {
   const dbConn = await db.getDb();
-  if (!dbConn) return;
+  if (!dbConn) return false;
   try {
     await dbConn.execute(sql`ALTER TABLE users ADD COLUMN passwordHash TEXT NULL`);
     console.log("[Local Auth] Added passwordHash column to users table");
+    return true;
   } catch (error: any) {
-    // Column already exists — ignore the "Duplicate column" error
-    if (error?.message?.includes("Duplicate column") || error?.code === "ER_DUP_FIELDNAME") {
-      return;
+    const msg = String(error?.message || error || "");
+    // Column already exists — that's fine
+    if (msg.includes("Duplicate column") || msg.includes("duplicate column") || error?.code === "ER_DUP_FIELDNAME") {
+      return true;
     }
-    console.warn("[Local Auth] Could not add passwordHash column:", error?.message);
+    console.error("[Local Auth] ALTER TABLE failed:", msg);
+    return false;
   }
 }
 
@@ -46,6 +49,34 @@ function isOAuthConfigured(): boolean {
   return Boolean(ENV.oAuthServerUrl && ENV.appId);
 }
 
+// Get admin user using raw SQL to avoid Drizzle ORM column mismatch issues
+async function getAdminUserRaw(): Promise<{ id: number; openId: string; email: string | null; passwordHash: string | null; name: string | null } | null> {
+  const dbConn = await db.getDb();
+  if (!dbConn) return null;
+  try {
+    const result = await dbConn.execute(sql`SELECT id, openId, email, name, passwordHash FROM users WHERE role = 'admin' LIMIT 1`);
+    const rows = (result as any)?.[0] || (result as any)?.rows || result;
+    if (Array.isArray(rows) && rows.length > 0) {
+      return rows[0] as any;
+    }
+    return null;
+  } catch {
+    // If passwordHash column doesn't exist yet, try without it
+    try {
+      const dbConn2 = await db.getDb();
+      if (!dbConn2) return null;
+      const result = await dbConn2.execute(sql`SELECT id, openId, email, name FROM users WHERE role = 'admin' LIMIT 1`);
+      const rows = (result as any)?.[0] || (result as any)?.rows || result;
+      if (Array.isArray(rows) && rows.length > 0) {
+        return { ...rows[0], passwordHash: null } as any;
+      }
+    } catch {
+      // DB is really broken
+    }
+    return null;
+  }
+}
+
 export function registerLocalAuthRoutes(app: Express) {
   // Check if local auth is needed (OAuth not configured)
   app.get("/api/auth/mode", (_req: Request, res: Response) => {
@@ -57,13 +88,11 @@ export function registerLocalAuthRoutes(app: Express) {
   app.get("/api/auth/setup-status", async (_req: Request, res: Response) => {
     try {
       if (!migrationDone) {
-        await ensurePasswordHashColumn();
-        migrationDone = true;
+        migrationDone = await ensurePasswordHashColumn();
       }
-      const admin = await db.getAdminUser();
+      const admin = await getAdminUserRaw();
       res.json({ needsSetup: !admin || !admin.passwordHash });
     } catch (error) {
-      // If DB is not available, setup is needed
       res.json({ needsSetup: true });
     }
   });
@@ -71,8 +100,13 @@ export function registerLocalAuthRoutes(app: Express) {
   // Initial admin setup — create admin account with password
   app.post("/api/auth/setup", async (req: Request, res: Response) => {
     try {
+      // Ensure migration
       if (!migrationDone) {
-        await ensurePasswordHashColumn();
+        const ok = await ensurePasswordHashColumn();
+        if (!ok) {
+          res.status(500).json({ error: "Database migration failed — could not add passwordHash column. Check server logs." });
+          return;
+        }
         migrationDone = true;
       }
 
@@ -95,50 +129,62 @@ export function registerLocalAuthRoutes(app: Express) {
       }
 
       // Check if admin already exists with a password
-      const existingAdmin = await db.getAdminUser();
+      const existingAdmin = await getAdminUserRaw();
       if (existingAdmin?.passwordHash) {
-        res.status(400).json({ error: "Admin account already exists. Use /api/auth/login instead." });
+        res.status(400).json({ error: "Admin account already exists. Use login instead." });
         return;
       }
 
       const passwordHash = await hashPassword(password);
-      const openId = `local_${randomBytes(16).toString("hex")}`;
+      const openId = existingAdmin?.openId || `local_${randomBytes(16).toString("hex")}`;
 
-      // Create or update admin user
-      await db.upsertUser({
-        openId: existingAdmin?.openId || openId,
-        name: name || "Admin",
-        email,
-        loginMethod: "local",
-        role: "admin",
-        lastSignedIn: new Date(),
-      });
+      // Use raw SQL for insert/update to avoid Drizzle ORM schema sync issues
+      const dbConn = await db.getDb();
+      if (!dbConn) {
+        res.status(500).json({ error: "Database not available" });
+        return;
+      }
 
-      // Get the user to update password
-      const user = await db.getUserByEmail(email);
-      if (user) {
-        await db.updateUserPassword(user.id, passwordHash);
+      if (existingAdmin) {
+        await dbConn.execute(
+          sql`UPDATE users SET email = ${email}, name = ${name || "Admin"}, passwordHash = ${passwordHash}, loginMethod = 'local', lastSignedIn = NOW() WHERE id = ${existingAdmin.id}`
+        );
+      } else {
+        await dbConn.execute(
+          sql`INSERT INTO users (openId, name, email, passwordHash, loginMethod, role, lastSignedIn, createdAt, updatedAt) VALUES (${openId}, ${name || "Admin"}, ${email}, ${passwordHash}, 'local', 'admin', NOW(), NOW(), NOW())`
+        );
+      }
+
+      // Check JWT_SECRET is configured
+      if (!ENV.cookieSecret) {
+        res.status(500).json({ error: "JWT_SECRET is not set in .env — cannot create session" });
+        return;
       }
 
       // Create session
-      const sessionToken = await sdk.createSessionToken(
-        existingAdmin?.openId || openId,
-        { name: name || "Admin", expiresInMs: ONE_YEAR_MS }
-      );
+      const sessionToken = await sdk.createSessionToken(openId, {
+        name: name || "Admin",
+        expiresInMs: ONE_YEAR_MS,
+      });
 
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
       res.json({ success: true });
-    } catch (error) {
-      console.error("[Local Auth] Setup failed:", error);
-      res.status(500).json({ error: "Setup failed" });
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      console.error("[Local Auth] Setup failed:", msg, error);
+      res.status(500).json({ error: `Setup failed: ${msg}` });
     }
   });
 
   // Local login with email + password
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
+      if (!migrationDone) {
+        migrationDone = await ensurePasswordHashColumn();
+      }
+
       const { email, password } = req.body;
 
       if (!email || !password) {
@@ -146,7 +192,16 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      const user = await db.getUserByEmail(email);
+      const dbConn = await db.getDb();
+      if (!dbConn) {
+        res.status(500).json({ error: "Database not available" });
+        return;
+      }
+
+      const result = await dbConn.execute(sql`SELECT id, openId, name, email, passwordHash, role FROM users WHERE email = ${email} LIMIT 1`);
+      const rows = (result as any)?.[0] || (result as any)?.rows || result;
+      const user = Array.isArray(rows) && rows.length > 0 ? rows[0] as any : null;
+
       if (!user || !user.passwordHash) {
         res.status(401).json({ error: "Invalid email or password" });
         return;
@@ -158,13 +213,8 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      // Update last signed in
-      await db.upsertUser({
-        openId: user.openId,
-        lastSignedIn: new Date(),
-      });
+      await dbConn.execute(sql`UPDATE users SET lastSignedIn = NOW() WHERE id = ${user.id}`);
 
-      // Create session token
       const sessionToken = await sdk.createSessionToken(user.openId, {
         name: user.name || "User",
         expiresInMs: ONE_YEAR_MS,
@@ -174,9 +224,10 @@ export function registerLocalAuthRoutes(app: Express) {
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
       res.json({ success: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
-    } catch (error) {
-      console.error("[Local Auth] Login failed:", error);
-      res.status(500).json({ error: "Login failed" });
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      console.error("[Local Auth] Login failed:", msg, error);
+      res.status(500).json({ error: `Login failed: ${msg}` });
     }
   });
 }
