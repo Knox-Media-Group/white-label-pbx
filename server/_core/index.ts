@@ -10,6 +10,8 @@ import { telnyxWebhookRouter } from "../telnyx-webhooks";
 import { retellWebhookRouter } from "../retell-webhooks";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { apiLimiter, authLimiter, webhookLimiter } from "../middleware/rate-limit";
+import { securityHeaders, verifyTelnyxWebhook } from "../middleware/security";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,17 +38,37 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // Security headers
+  app.use(securityHeaders);
+
+  // Health check endpoint (no rate limit, no auth)
+  app.get("/api/health", (req, res) => {
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      version: process.env.npm_package_version || "1.0.0",
+      node: process.version,
+      memory: process.memoryUsage(),
+    });
+  });
+
   // OAuth callback under /api/oauth/callback
+  app.use("/api/oauth", authLimiter);
   registerOAuthRoutes(app);
+
   // SignalWire webhooks (legacy)
-  app.use("/api/webhooks", webhookRouter);
-  // Telnyx webhooks
-  app.use("/api/webhooks/telnyx", telnyxWebhookRouter);
+  app.use("/api/webhooks", webhookLimiter, webhookRouter);
+  // Telnyx webhooks with signature verification
+  app.use("/api/webhooks/telnyx", webhookLimiter, verifyTelnyxWebhook, telnyxWebhookRouter);
   // Retell AI webhooks
-  app.use("/api/webhooks/retell", retellWebhookRouter);
-  // tRPC API
+  app.use("/api/webhooks/retell", webhookLimiter, retellWebhookRouter);
+
+  // tRPC API with rate limiting
   app.use(
     "/api/trpc",
+    apiLimiter,
     createExpressMiddleware({
       router: appRouter,
       createContext,

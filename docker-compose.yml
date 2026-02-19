@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  pbx-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: white-label-pbx
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - pbx-logs:/app/logs
+    networks:
+      - pbx-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: MySQL database (remove if using external Supabase)
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: pbx-mysql
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3306:3306"
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme}
+  #     MYSQL_DATABASE: pbx
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #   networks:
+  #     - pbx-network
+
+volumes:
+  pbx-logs:
+  # mysql-data:
+
+networks:
+  pbx-network:
+    driver: bridge

@@ -102,7 +102,7 @@
 - [x] Recording search and filtering
 
 ## Bug Fixes
-- [ ] Fix customer status stuck on 'pending' - should be 'active' after creation
+- [x] Fix customer status stuck on 'pending' - auto-provisions Telnyx resources and activates
 - [x] Fix AI call handling not transferring calls when caller asks for sales/departments
 
 ## SMS Call Summary Feature
@@ -118,3 +118,53 @@
 - [x] Create webhook endpoint for AI Agent SWAIG transfer function
 - [x] Return proper SWML with transfer action from webhook
 - [x] Provide user with AI Agent configuration instructions
+
+## Telnyx Integration (Primary Carrier)
+- [x] Telnyx API client with SIP connections, credential connections, TeXML
+- [x] Phone number search, purchase, and management
+- [x] TeXML call routing (voice, ring groups, voicemail)
+- [x] Telnyx webhook handlers (voice, status, recording, voicemail, missed)
+- [x] Call Control event handling
+- [x] SMS/MMS messaging via Telnyx
+- [x] Outbound voice profiles
+- [x] Number port orders (Viirtue -> Telnyx)
+
+## Retell AI Integration
+- [x] AI receptionist agent creation and management
+- [x] Inbound call forwarding to Retell via SIP
+- [x] Dynamic variables injection (company name, departments)
+- [x] Post-call analysis with transcription and summaries
+- [x] Message taking via custom tool webhook
+- [x] SMS notification for AI-taken messages
+
+## VoIP Phone Management
+- [x] VoIP phone registration with auto-provisioning
+- [x] SIP credential auto-generation
+- [x] Telnyx credential connection creation per phone
+- [x] Provisioning config endpoint (SIP server, codecs, STUN)
+- [x] Admin VoIP Phones page with CRUD
+- [x] Customer portal VoIP Phones page (read-only)
+
+## Number Porting
+- [x] Port order creation with LOA details
+- [x] Telnyx port order submission
+- [x] Port status tracking and sync
+- [x] Auto-activation of numbers on port completion
+- [x] Admin Port Orders page with CRUD
+- [x] Customer portal Port Orders page (read-only)
+
+## Security Hardening
+- [x] Rate limiting middleware (API, auth, webhooks)
+- [x] Security headers (XSS, clickjacking, HSTS, etc.)
+- [x] Telnyx webhook signature verification
+- [x] CORS configuration
+
+## Deployment & DevOps
+- [x] Dockerfile with multi-stage build
+- [x] docker-compose.yml for container orchestration
+- [x] Nginx reverse proxy with SSL configuration
+- [x] PM2 process management configuration
+- [x] Health check endpoint (/api/health)
+- [x] Server setup script (Ubuntu/Debian)
+- [x] Automated deployment script
+- [x] Automated backup script (database + config)

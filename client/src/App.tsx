@@ -13,6 +13,8 @@ import AdminCustomerDetail from "./pages/admin/CustomerDetail";
 import AdminSettings from "./pages/admin/Settings";
 import AdminPhoneNumbers from "./pages/admin/PhoneNumbers";
 import AdminSipEndpoints from "./pages/admin/SipEndpoints";
+import AdminVoipPhones from "./pages/admin/VoipPhones";
+import AdminPortOrders from "./pages/admin/PortOrders";
 
 // Customer Portal Pages
 import CustomerDashboard from "./pages/customer/Dashboard";
@@ -23,6 +25,8 @@ import CustomerCallRoutes from "./pages/customer/CallRoutes";
 import CustomerRecordings from "./pages/customer/Recordings";
 import CustomerBranding from "./pages/customer/Branding";
 import CustomerSettings from "./pages/customer/Settings";
+import CustomerVoipPhones from "./pages/customer/VoipPhones";
+import CustomerPortOrders from "./pages/customer/PortOrders";
 
 function Router() {
   return (
@@ -37,7 +41,9 @@ function Router() {
       <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/phone-numbers" component={AdminPhoneNumbers} />
       <Route path="/admin/sip-endpoints" component={AdminSipEndpoints} />
-      
+      <Route path="/admin/voip-phones" component={AdminVoipPhones} />
+      <Route path="/admin/port-orders" component={AdminPortOrders} />
+
       {/* Customer Portal Routes */}
       <Route path="/portal" component={CustomerDashboard} />
       <Route path="/portal/endpoints" component={CustomerEndpoints} />
@@ -47,6 +53,8 @@ function Router() {
       <Route path="/portal/recordings" component={CustomerRecordings} />
       <Route path="/portal/branding" component={CustomerBranding} />
       <Route path="/portal/settings" component={CustomerSettings} />
+      <Route path="/portal/voip-phones" component={CustomerVoipPhones} />
+      <Route path="/portal/port-orders" component={CustomerPortOrders} />
       
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

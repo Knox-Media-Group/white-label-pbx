@@ -68,6 +68,45 @@ export const appRouter = router({
           notes: input.notes || null,
           status: 'pending',
         });
+
+        // Auto-provision Telnyx resources and activate customer
+        try {
+          let telnyxConnectionId: string | undefined;
+          let telnyxTexmlAppId: string | undefined;
+
+          if (telnyxApi.isConfigured()) {
+            // Create a credential connection for this customer's SIP endpoints
+            const connResult = await telnyxApi.createCredentialConnection({
+              connection_name: `Customer ${id} - ${input.companyName || input.name}`,
+              user_name: `customer_${id}`,
+              password: generateSipPassword(),
+            });
+            telnyxConnectionId = connResult.data?.id;
+
+            // Create a TeXML application for inbound call routing
+            const webhookUrl = process.env.WEBHOOK_URL || '';
+            if (webhookUrl) {
+              const texmlResult = await telnyxApi.createTexmlApplication({
+                friendly_name: `${input.companyName || input.name} - Inbound`,
+                voice_url: `${webhookUrl}/api/webhooks/telnyx/voice`,
+                status_callback: `${webhookUrl}/api/webhooks/telnyx/status`,
+              });
+              telnyxTexmlAppId = texmlResult.data?.id;
+            }
+          }
+
+          // Activate the customer with provisioned resources
+          await db.updateCustomer(id, {
+            status: 'active',
+            telnyxCredentialConnectionId: telnyxConnectionId,
+            telnyxTexmlAppId: telnyxTexmlAppId,
+          });
+        } catch (provisionError) {
+          console.error(`[Customer Create] Telnyx provisioning failed for customer ${id}:`, provisionError);
+          // Still activate even if Telnyx provisioning fails - can be retried later
+          await db.updateCustomer(id, { status: 'active' });
+        }
+
         return { id };
       }),
     

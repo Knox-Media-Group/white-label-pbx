@@ -19,9 +19,9 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { 
-  LayoutDashboard, LogOut, Phone, PhoneCall, Users, 
-  Route, Mic, Palette, Settings, Bell 
+import {
+  LayoutDashboard, LogOut, Phone, PhoneCall, Users,
+  Route, Mic, Palette, Settings, Monitor, ArrowRightLeft
 } from "lucide-react";
 import { CSSProperties, useState } from "react";
 import { useLocation } from "wouter";
@@ -32,9 +32,11 @@ const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/portal" },
   { icon: Phone, label: "SIP Endpoints", path: "/portal/endpoints" },
   { icon: PhoneCall, label: "Phone Numbers", path: "/portal/phone-numbers" },
+  { icon: Monitor, label: "VoIP Phones", path: "/portal/voip-phones" },
   { icon: Users, label: "Ring Groups", path: "/portal/ring-groups" },
   { icon: Route, label: "Call Routes", path: "/portal/call-routes" },
   { icon: Mic, label: "Recordings", path: "/portal/recordings" },
+  { icon: ArrowRightLeft, label: "Port Orders", path: "/portal/port-orders" },
   { icon: Palette, label: "Branding", path: "/portal/branding" },
   { icon: Settings, label: "Settings", path: "/portal/settings" },
 ];
