@@ -15,8 +15,10 @@ const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (typeof window === "undefined") return;
 
   const isUnauthorized = error.message === UNAUTHED_ERR_MSG;
-
   if (!isUnauthorized) return;
+
+  // Don't redirect if already on the login page
+  if (window.location.pathname === "/login") return;
 
   window.location.href = getLoginUrl();
 };

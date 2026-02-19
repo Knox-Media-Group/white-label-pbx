@@ -4,6 +4,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
+import { registerLocalAuthRoutes } from "./local-auth";
 import { appRouter } from "../routers";
 import { webhookRouter } from "../webhooks";
 import { telnyxWebhookRouter } from "../telnyx-webhooks";
@@ -53,6 +54,10 @@ async function startServer() {
       memory: process.memoryUsage(),
     });
   });
+
+  // Local auth endpoints (login, setup) — works when OAuth not configured
+  app.use("/api/auth", authLimiter);
+  registerLocalAuthRoutes(app);
 
   // OAuth callback under /api/oauth/callback
   app.use("/api/oauth", authLimiter);
