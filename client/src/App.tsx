@@ -13,6 +13,7 @@ import AdminCustomerDetail from "./pages/admin/CustomerDetail";
 import AdminSettings from "./pages/admin/Settings";
 import AdminPhoneNumbers from "./pages/admin/PhoneNumbers";
 import AdminSipEndpoints from "./pages/admin/SipEndpoints";
+import AdminViirtueImport from "./pages/admin/ViirtueImport";
 
 // Customer Portal Pages
 import CustomerDashboard from "./pages/customer/Dashboard";
@@ -37,7 +38,8 @@ function Router() {
       <Route path="/admin/settings" component={AdminSettings} />
       <Route path="/admin/phone-numbers" component={AdminPhoneNumbers} />
       <Route path="/admin/sip-endpoints" component={AdminSipEndpoints} />
-      
+      <Route path="/admin/import" component={AdminViirtueImport} />
+
       {/* Customer Portal Routes */}
       <Route path="/portal" component={CustomerDashboard} />
       <Route path="/portal/endpoints" component={CustomerEndpoints} />

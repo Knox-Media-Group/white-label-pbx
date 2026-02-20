@@ -8,6 +8,8 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
 import * as telnyx from "./telnyx";
+import * as viirtue from "./viirtue";
+import type { ViirtueConfig } from "./viirtue";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
@@ -939,6 +941,222 @@ Example output:
         return { summary };
       }),
   }),
+
+  // ============ VIIRTUE IMPORT ============
+  viirtueImport: router({
+    // Test connection to Viirtue/NetSapiens API
+    testConnection: adminProcedure
+      .input(z.object({
+        serverUrl: z.string().url(),
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        return viirtue.testConnection(input);
+      }),
+
+    // List all domains (customers) from Viirtue
+    listDomains: adminProcedure
+      .input(z.object({
+        serverUrl: z.string().url(),
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        return viirtue.listDomains(input);
+      }),
+
+    // Preview a single domain's data before importing
+    previewDomain: adminProcedure
+      .input(z.object({
+        serverUrl: z.string().url(),
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+        domain: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const { domain, ...config } = input;
+        return viirtue.exportDomain(config, domain);
+      }),
+
+    // Import a domain from Viirtue into the local database + provision Telnyx
+    importDomain: adminProcedure
+      .input(z.object({
+        serverUrl: z.string().url(),
+        clientId: z.string().min(1),
+        clientSecret: z.string().min(1),
+        domain: z.string().min(1),
+        // Override fields for the new customer
+        customerName: z.string().min(1),
+        customerEmail: z.string().email(),
+        companyName: z.string().optional(),
+        // Whether to provision SIP credentials on Telnyx
+        provisionTelnyx: z.boolean().default(true),
+        // Whether to import phone numbers (numbers need to be ported separately)
+        importPhoneNumbers: z.boolean().default(true),
+        // Whether to import call queues as ring groups
+        importCallQueues: z.boolean().default(true),
+      }))
+      .mutation(async ({ input }) => {
+        const { domain, customerName, customerEmail, companyName, provisionTelnyx, importPhoneNumbers, importCallQueues, ...config } = input;
+
+        const results = {
+          customerId: 0,
+          endpoints: { imported: 0, failed: 0, errors: [] as string[] },
+          phoneNumbers: { imported: 0, failed: 0, errors: [] as string[] },
+          ringGroups: { imported: 0, failed: 0, errors: [] as string[] },
+        };
+
+        // 1. Export all data from Viirtue
+        const exported = await viirtue.exportDomain(config, domain);
+
+        // 2. Create the customer
+        const customerId = await db.createCustomer({
+          name: customerName,
+          companyName: companyName || exported.domain.description || domain,
+          email: customerEmail,
+          status: 'active',
+          notes: `Imported from Viirtue domain: ${domain}`,
+        });
+        results.customerId = customerId;
+
+        // 3. Import subscribers as SIP endpoints
+        const endpointMap = new Map<string, number>(); // viirtue user → local endpoint ID
+        for (const sub of exported.subscribers) {
+          try {
+            const displayName = [sub.first_name, sub.last_name].filter(Boolean).join(' ') || sub.name_caller_id || sub.user;
+            const username = `${sub.user}_${domain.replace(/\./g, '_')}`;
+            const password = generateRandomPassword();
+
+            // Create local DB record
+            const endpointId = await db.createSipEndpoint({
+              customerId,
+              username,
+              password,
+              callerId: sub.number_caller_id || null,
+              displayName: displayName || null,
+              extensionNumber: sub.dial || sub.user || null,
+              status: provisionTelnyx ? 'provisioning' : 'active',
+              callHandler: 'texml_webhooks',
+            });
+            endpointMap.set(sub.user, endpointId);
+
+            // Provision on Telnyx if requested
+            if (provisionTelnyx && telnyx.isConfigured()) {
+              try {
+                const telnyxCred = await telnyx.createSipCredential({
+                  username,
+                  password,
+                  name: displayName,
+                });
+                await db.updateSipEndpoint(endpointId, {
+                  telnyxCredentialId: telnyxCred.id,
+                  status: 'active',
+                });
+              } catch (telnyxErr) {
+                const msg = telnyxErr instanceof Error ? telnyxErr.message : 'Telnyx provisioning failed';
+                results.endpoints.errors.push(`${sub.user}: Telnyx error - ${msg}`);
+                // Keep the local record, just mark it as needs attention
+              }
+            }
+
+            results.endpoints.imported++;
+          } catch (err) {
+            results.endpoints.failed++;
+            const msg = err instanceof Error ? err.message : 'Unknown error';
+            results.endpoints.errors.push(`${sub.user}: ${msg}`);
+          }
+        }
+
+        // 4. Import phone numbers (as records — actual porting is a separate process)
+        if (importPhoneNumbers) {
+          for (const pn of exported.phoneNumbers) {
+            try {
+              // Normalize phone number format
+              let phoneNumber = pn.dialplan;
+              if (!phoneNumber.startsWith('+')) {
+                phoneNumber = `+1${phoneNumber.replace(/\D/g, '')}`;
+              }
+
+              // Try to find which endpoint this number routes to
+              let assignedEndpointId: number | null = null;
+              if (pn.from_user && endpointMap.has(pn.from_user)) {
+                assignedEndpointId = endpointMap.get(pn.from_user)!;
+              }
+
+              await db.createPhoneNumber({
+                customerId,
+                phoneNumber,
+                friendlyName: pn.description || phoneNumber,
+                voiceEnabled: true,
+                smsEnabled: false,
+                assignedToEndpointId: assignedEndpointId,
+                callHandler: assignedEndpointId ? 'sip_endpoint' : 'texml_webhooks',
+                status: 'porting', // Mark as porting since they need to be ported from Viirtue to Telnyx
+              });
+              results.phoneNumbers.imported++;
+            } catch (err) {
+              results.phoneNumbers.failed++;
+              const msg = err instanceof Error ? err.message : 'Unknown error';
+              results.phoneNumbers.errors.push(`${pn.dialplan}: ${msg}`);
+            }
+          }
+        }
+
+        // 5. Import call queues as ring groups
+        if (importCallQueues) {
+          for (const queue of exported.callQueues) {
+            try {
+              // Map queue agents to local endpoint IDs
+              const memberIds: number[] = [];
+              if (queue.agents) {
+                for (const agent of queue.agents) {
+                  const localId = endpointMap.get(agent);
+                  if (localId) memberIds.push(localId);
+                }
+              }
+
+              // Map strategy
+              let strategy: 'simultaneous' | 'sequential' | 'round_robin' | 'random' = 'simultaneous';
+              if (queue.strategy) {
+                const s = queue.strategy.toLowerCase();
+                if (s.includes('round') || s.includes('robin')) strategy = 'round_robin';
+                else if (s.includes('seq') || s.includes('linear') || s.includes('hunt')) strategy = 'sequential';
+                else if (s.includes('random')) strategy = 'random';
+              }
+
+              await db.createRingGroup({
+                customerId,
+                name: queue.description || queue.queue,
+                description: `Imported from Viirtue call queue: ${queue.queue}`,
+                strategy,
+                ringTimeout: queue.timeout || 30,
+                memberEndpointIds: memberIds,
+                failoverAction: 'voicemail',
+                status: 'active',
+              });
+              results.ringGroups.imported++;
+            } catch (err) {
+              results.ringGroups.failed++;
+              const msg = err instanceof Error ? err.message : 'Unknown error';
+              results.ringGroups.errors.push(`${queue.queue}: ${msg}`);
+            }
+          }
+        }
+
+        return results;
+      }),
+  }),
 });
+
+function generateRandomPassword(): string {
+  const chars = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%';
+  let password = '';
+  const bytes = require('crypto').randomBytes(16);
+  for (let i = 0; i < 16; i++) {
+    password += chars[bytes[i] % chars.length];
+  }
+  return password;
+}
 
 export type AppRouter = typeof appRouter;
