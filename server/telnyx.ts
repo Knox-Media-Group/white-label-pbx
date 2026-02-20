@@ -27,18 +27,7 @@ async function getSipConnectionId(): Promise<string> {
   return dbVal || TELNYX_SIP_CONNECTION_ID;
 }
 
-// Create axios instance with auth
-const createClient = (): AxiosInstance => {
-  return axios.create({
-    baseURL: BASE_URL,
-    headers: {
-      "Authorization": `Bearer ${TELNYX_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-  });
-};
-
-// Create client with dynamically-resolved API key
+// Create client with dynamically-resolved API key (DB settings first, then env)
 const createDynamicClient = async (): Promise<AxiosInstance> => {
   const apiKey = await getApiKey();
   return axios.create({
@@ -53,7 +42,7 @@ const createDynamicClient = async (): Promise<AxiosInstance> => {
 // ============ Account ============
 
 export async function getAccountInfo() {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get("/balance");
   return response.data.data;
 }
@@ -68,15 +57,16 @@ export interface CreateSipCredentialParams {
 }
 
 export async function listSipCredentials() {
-  const client = createClient();
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
   const response = await client.get("/telephony_credentials", {
-    params: { "filter[connection_id]": TELNYX_SIP_CONNECTION_ID },
+    params: { "filter[connection_id]": connId },
   });
   return response.data;
 }
 
 export async function getSipCredential(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get(`/telephony_credentials/${id}`);
   return response.data.data;
 }
@@ -86,9 +76,10 @@ export async function createSipCredential(params: {
   password: string;
   name?: string;
 }) {
-  const client = createClient();
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
   const response = await client.post("/telephony_credentials", {
-    connection_id: TELNYX_SIP_CONNECTION_ID,
+    connection_id: connId,
     name: params.name || params.username,
     sip_username: params.username,
     sip_password: params.password,
@@ -100,13 +91,13 @@ export async function updateSipCredential(id: string, params: {
   name?: string;
   sip_password?: string;
 }) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.patch(`/telephony_credentials/${id}`, params);
   return response.data.data;
 }
 
 export async function deleteSipCredential(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.delete(`/telephony_credentials/${id}`);
   return response.data;
 }
@@ -123,7 +114,7 @@ export interface SearchPhoneNumbersParams {
 }
 
 export async function searchAvailablePhoneNumbers(params: SearchPhoneNumbersParams = {}) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const queryParams: Record<string, string> = {
     "filter[country_code]": "US",
     "filter[limit]": String(params.limit || 20),
@@ -146,25 +137,27 @@ export async function searchAvailablePhoneNumbers(params: SearchPhoneNumbersPara
 }
 
 export async function listPhoneNumbers() {
-  const client = createClient();
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
   const response = await client.get("/phone_numbers", {
-    params: { "filter[connection_id]": TELNYX_SIP_CONNECTION_ID },
+    params: { "filter[connection_id]": connId },
   });
   return response.data;
 }
 
 export async function getPhoneNumber(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get(`/phone_numbers/${id}`);
   return response.data.data;
 }
 
 export async function purchasePhoneNumber(phoneNumber: string, friendlyName?: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
   // Create a number order
   const response = await client.post("/number_orders", {
     phone_numbers: [{ phone_number: phoneNumber }],
-    connection_id: TELNYX_SIP_CONNECTION_ID,
+    connection_id: connId,
   });
   return response.data.data;
 }
@@ -174,7 +167,7 @@ export async function updatePhoneNumber(id: string, params: {
   connectionId?: string;
   tags?: string[];
 }) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const body: Record<string, unknown> = {};
   if (params.connectionId) body.connection_id = params.connectionId;
   if (params.tags) body.tags = params.tags;
@@ -184,7 +177,7 @@ export async function updatePhoneNumber(id: string, params: {
 }
 
 export async function releasePhoneNumber(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.delete(`/phone_numbers/${id}`);
   return response.data;
 }
@@ -192,7 +185,7 @@ export async function releasePhoneNumber(id: string) {
 // ============ Calls ============
 
 export async function listCalls(params?: { from?: string; to?: string; status?: string }) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const queryParams: Record<string, string> = {};
 
   if (params?.from) queryParams["filter[from]"] = params.from;
@@ -203,7 +196,7 @@ export async function listCalls(params?: { from?: string; to?: string; status?: 
 }
 
 export async function getCall(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get(`/calls/${id}`);
   return response.data.data;
 }
@@ -214,9 +207,10 @@ export async function makeCall(params: {
   webhookUrl: string;
   connectionId?: string;
 }) {
-  const client = createClient();
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
   const response = await client.post("/calls", {
-    connection_id: params.connectionId || TELNYX_SIP_CONNECTION_ID,
+    connection_id: params.connectionId || connId,
     from: params.from,
     to: params.to,
     webhook_url: params.webhookUrl,
@@ -247,7 +241,7 @@ export async function sendSms(params: SendSmsParams) {
 }
 
 export async function listMessages(params?: { from?: string; to?: string }) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const queryParams: Record<string, string> = {};
 
   if (params?.from) queryParams["filter[from]"] = params.from;
@@ -258,7 +252,7 @@ export async function listMessages(params?: { from?: string; to?: string }) {
 }
 
 export async function getMessage(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get(`/messages/${id}`);
   return response.data.data;
 }
@@ -266,7 +260,7 @@ export async function getMessage(id: string) {
 // ============ Recordings ============
 
 export async function listRecordings(callControlId?: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const queryParams: Record<string, string> = {};
   if (callControlId) queryParams["filter[call_control_id]"] = callControlId;
 
@@ -275,13 +269,13 @@ export async function listRecordings(callControlId?: string) {
 }
 
 export async function getRecording(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.get(`/recordings/${id}`);
   return response.data.data;
 }
 
 export async function deleteRecording(id: string) {
-  const client = createClient();
+  const client = await createDynamicClient();
   const response = await client.delete(`/recordings/${id}`);
   return response.data;
 }

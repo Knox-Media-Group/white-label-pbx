@@ -154,9 +154,13 @@ export const appRouter = router({
       return db.getAllCustomers();
     }),
     
-    getById: adminProcedure
+    getById: protectedProcedure
       .input(z.object({ id: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
+        // Admins can access any customer; customers can only access their own
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
+        }
         return db.getCustomerById(input.id);
       }),
     
@@ -180,7 +184,7 @@ export const appRouter = router({
         return { id };
       }),
     
-    update: adminProcedure
+    update: protectedProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().optional(),
@@ -196,8 +200,19 @@ export const appRouter = router({
         smsSummaryEnabled: z.boolean().optional(),
         notificationPhone: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        // Admins can update any customer; customers can only update their own (limited fields)
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
+        }
         const { id, ...data } = input;
+        // Non-admins cannot change status or Telnyx credentials
+        if (ctx.user.role !== 'admin') {
+          delete (data as any).status;
+          delete (data as any).telnyxConnectionId;
+          delete (data as any).telnyxApiKey;
+          delete (data as any).telnyxMessagingProfileId;
+        }
         await db.updateCustomer(id, data);
         return { success: true };
       }),
@@ -213,14 +228,17 @@ export const appRouter = router({
       return db.getCustomerStats();
     }),
     
-    updateBranding: adminProcedure
+    updateBranding: protectedProcedure
       .input(z.object({
         id: z.number(),
         brandingLogo: z.string().optional(),
         brandingPrimaryColor: z.string().optional(),
         brandingCompanyName: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.id) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
+        }
         const { id, ...data } = input;
         await db.updateCustomer(id, data);
         return { success: true };
@@ -356,6 +374,7 @@ export const appRouter = router({
         assignedToEndpointId: z.number().nullable().optional(),
         assignedToRingGroupId: z.number().nullable().optional(),
         callHandler: z.enum(['texml_webhooks', 'call_control', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
+        retellAgentId: z.string().nullable().optional(),
         status: z.enum(['active', 'inactive', 'porting']).optional(),
       }))
       .mutation(async ({ input }) => {

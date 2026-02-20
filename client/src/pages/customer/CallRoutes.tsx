@@ -30,11 +30,23 @@ import { Textarea } from "@/components/ui/textarea";
 const DEMO_CUSTOMER_ID = 1;
 
 type DestinationType = "endpoint" | "ring_group" | "external" | "voicemail" | "ai_agent";
+type MatchType = "all" | "caller_id" | "time_based" | "did";
+
+type EditRouteState = {
+  id: number;
+  name: string;
+  matchType: MatchType;
+  matchPattern: string;
+  destinationType: DestinationType;
+  destinationExternal: string;
+  priority: number;
+  status: "active" | "inactive";
+};
 
 export default function CustomerCallRoutes() {
   const { user } = useAuth();
   const customerId = user?.customerId || DEMO_CUSTOMER_ID;
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
@@ -45,6 +57,17 @@ export default function CustomerCallRoutes() {
     destinationType: "endpoint" as DestinationType,
     destinationValue: "",
     priority: 10,
+  });
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editRoute, setEditRoute] = useState<EditRouteState>({
+    id: 0,
+    name: "",
+    matchType: "all",
+    matchPattern: "",
+    destinationType: "endpoint",
+    destinationExternal: "",
+    priority: 10,
+    status: "active",
   });
 
   const { data: callRoutes, isLoading, refetch } = trpc.callRoutes.list.useQuery({ customerId });
@@ -70,6 +93,48 @@ export default function CustomerCallRoutes() {
       toast.error(error.message || "Failed to delete call route");
     },
   });
+
+  const updateMutation = trpc.callRoutes.update.useMutation({
+    onSuccess: () => {
+      toast.success("Call route updated successfully");
+      setIsEditOpen(false);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update call route");
+    },
+  });
+
+  const handleOpenEdit = (route: { id: number; name: string; matchType?: string | null; matchPattern?: string | null; destinationType: string; destinationExternal?: string | null; priority?: number | null; status?: string | null }) => {
+    setEditRoute({
+      id: route.id,
+      name: route.name,
+      matchType: (route.matchType as MatchType) || "all",
+      matchPattern: route.matchPattern || "",
+      destinationType: (route.destinationType as DestinationType) || "endpoint",
+      destinationExternal: route.destinationExternal || "",
+      priority: route.priority ?? 10,
+      status: (route.status as "active" | "inactive") || "active",
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleSave = () => {
+    if (!editRoute.name) {
+      toast.error("Name is required");
+      return;
+    }
+    updateMutation.mutate({
+      id: editRoute.id,
+      name: editRoute.name,
+      matchType: editRoute.matchType,
+      matchPattern: editRoute.matchPattern || undefined,
+      destinationType: editRoute.destinationType,
+      destinationExternal: editRoute.destinationExternal || undefined,
+      priority: editRoute.priority,
+      status: editRoute.status,
+    });
+  };
 
   const aiSuggestionMutation = trpc.llmCallFlows.getRoutingSuggestions.useMutation({
     onSuccess: (data) => {
@@ -309,7 +374,7 @@ export default function CustomerCallRoutes() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => handleOpenEdit(route)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -335,6 +400,122 @@ export default function CustomerCallRoutes() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Call Route Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Call Route</DialogTitle>
+            <DialogDescription>
+              Update the routing rule configuration
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">Route Name *</Label>
+              <Input
+                id="edit-name"
+                value={editRoute.name}
+                onChange={(e) => setEditRoute({ ...editRoute, name: e.target.value })}
+                placeholder="Business Hours Route"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-matchType">Match Type</Label>
+              <Select
+                value={editRoute.matchType}
+                onValueChange={(value) => setEditRoute({ ...editRoute, matchType: value as MatchType })}
+              >
+                <SelectTrigger id="edit-matchType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Calls</SelectItem>
+                  <SelectItem value="caller_id">Caller ID</SelectItem>
+                  <SelectItem value="time_based">Time Based</SelectItem>
+                  <SelectItem value="did">DID</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-matchPattern">Match Pattern</Label>
+              <Input
+                id="edit-matchPattern"
+                value={editRoute.matchPattern}
+                onChange={(e) => setEditRoute({ ...editRoute, matchPattern: e.target.value })}
+                placeholder="+1555*"
+              />
+              <p className="text-xs text-muted-foreground">
+                Use * as wildcard. E.g., +1555* matches all numbers starting with +1555
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-destType">Destination Type</Label>
+              <Select
+                value={editRoute.destinationType}
+                onValueChange={(value) => setEditRoute({ ...editRoute, destinationType: value as DestinationType })}
+              >
+                <SelectTrigger id="edit-destType">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="endpoint">SIP Endpoint</SelectItem>
+                  <SelectItem value="ring_group">Ring Group</SelectItem>
+                  <SelectItem value="external">External Number</SelectItem>
+                  <SelectItem value="voicemail">Voicemail</SelectItem>
+                  <SelectItem value="ai_agent">AI Agent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-destExternal">Destination External</Label>
+              <Input
+                id="edit-destExternal"
+                value={editRoute.destinationExternal}
+                onChange={(e) => setEditRoute({ ...editRoute, destinationExternal: e.target.value })}
+                placeholder="Extension or phone number"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-priority">Priority</Label>
+              <Input
+                id="edit-priority"
+                type="number"
+                value={editRoute.priority}
+                onChange={(e) => setEditRoute({ ...editRoute, priority: parseInt(e.target.value) || 10 })}
+                min={1}
+                max={100}
+              />
+              <p className="text-xs text-muted-foreground">
+                Lower numbers = higher priority
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-status">Status</Label>
+              <Select
+                value={editRoute.status}
+                onValueChange={(value) => setEditRoute({ ...editRoute, status: value as "active" | "inactive" })}
+              >
+                <SelectTrigger id="edit-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CustomerLayout>
   );
 }

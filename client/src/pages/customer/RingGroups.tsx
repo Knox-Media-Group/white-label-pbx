@@ -29,11 +29,20 @@ import {
 const DEMO_CUSTOMER_ID = 1;
 
 type RingStrategy = "simultaneous" | "sequential" | "round_robin" | "random";
+type FailoverAction = "voicemail" | "forward" | "hangup";
+
+type EditForm = {
+  name: string;
+  extensionNumber: string;
+  strategy: RingStrategy;
+  ringTimeout: number;
+  failoverAction: FailoverAction;
+};
 
 export default function CustomerRingGroups() {
   const { user } = useAuth();
   const customerId = user?.customerId || DEMO_CUSTOMER_ID;
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newGroup, setNewGroup] = useState({
@@ -42,6 +51,14 @@ export default function CustomerRingGroups() {
     ringStrategy: "simultaneous" as RingStrategy,
     ringTimeout: 30,
     callerId: "",
+  });
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>({
+    name: "",
+    extensionNumber: "",
+    strategy: "simultaneous",
+    ringTimeout: 30,
+    failoverAction: "voicemail",
   });
 
   const { data: ringGroups, isLoading, refetch } = trpc.ringGroups.list.useQuery({ customerId });
@@ -58,6 +75,17 @@ export default function CustomerRingGroups() {
     },
   });
   
+  const updateMutation = trpc.ringGroups.update.useMutation({
+    onSuccess: () => {
+      toast.success("Ring group updated successfully");
+      setEditingGroupId(null);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update ring group");
+    },
+  });
+
   const deleteMutation = trpc.ringGroups.delete.useMutation({
     onSuccess: () => {
       toast.success("Ring group deleted");
@@ -80,6 +108,33 @@ export default function CustomerRingGroups() {
       return;
     }
     createMutation.mutate({ customerId, ...newGroup });
+  };
+
+  const handleEditOpen = (group: { id: number; name: string; extensionNumber?: string | null; strategy: string; ringTimeout?: number | null; failoverAction?: string | null }) => {
+    setEditForm({
+      name: group.name,
+      extensionNumber: group.extensionNumber || "",
+      strategy: (group.strategy as RingStrategy) || "simultaneous",
+      ringTimeout: group.ringTimeout || 30,
+      failoverAction: (group.failoverAction as FailoverAction) || "voicemail",
+    });
+    setEditingGroupId(group.id);
+  };
+
+  const handleEditSave = () => {
+    if (!editForm.name) {
+      toast.error("Name is required");
+      return;
+    }
+    if (editingGroupId === null) return;
+    updateMutation.mutate({
+      id: editingGroupId,
+      name: editForm.name,
+      extensionNumber: editForm.extensionNumber || undefined,
+      strategy: editForm.strategy,
+      ringTimeout: editForm.ringTimeout,
+      failoverAction: editForm.failoverAction,
+    });
   };
 
   const strategyLabels: Record<RingStrategy, string> = {
@@ -247,7 +302,7 @@ export default function CustomerRingGroups() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => handleEditOpen(group)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -273,6 +328,90 @@ export default function CustomerRingGroups() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Ring Group Dialog */}
+      <Dialog open={editingGroupId !== null} onOpenChange={(open) => { if (!open) setEditingGroupId(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Ring Group</DialogTitle>
+            <DialogDescription>
+              Update the ring group settings
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-name">Group Name *</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="Sales Team"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-extension">Extension Number</Label>
+              <Input
+                id="edit-extension"
+                value={editForm.extensionNumber}
+                onChange={(e) => setEditForm({ ...editForm, extensionNumber: e.target.value })}
+                placeholder="2001"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-strategy">Ring Strategy</Label>
+              <Select
+                value={editForm.strategy}
+                onValueChange={(value) => setEditForm({ ...editForm, strategy: value as RingStrategy })}
+              >
+                <SelectTrigger id="edit-strategy">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="simultaneous">Ring All (Simultaneous)</SelectItem>
+                  <SelectItem value="sequential">Sequential</SelectItem>
+                  <SelectItem value="round_robin">Round Robin</SelectItem>
+                  <SelectItem value="random">Random</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-timeout">Ring Timeout (seconds)</Label>
+              <Input
+                id="edit-timeout"
+                type="number"
+                value={editForm.ringTimeout}
+                onChange={(e) => setEditForm({ ...editForm, ringTimeout: parseInt(e.target.value) || 30 })}
+                min={5}
+                max={120}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-failover">Failover Action</Label>
+              <Select
+                value={editForm.failoverAction}
+                onValueChange={(value) => setEditForm({ ...editForm, failoverAction: value as FailoverAction })}
+              >
+                <SelectTrigger id="edit-failover">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="voicemail">Voicemail</SelectItem>
+                  <SelectItem value="forward">Forward</SelectItem>
+                  <SelectItem value="hangup">Hang Up</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingGroupId(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CustomerLayout>
   );
 }

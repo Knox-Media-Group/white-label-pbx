@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { Plus, Search, MoreHorizontal, PhoneCall, Trash2, Edit } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +39,21 @@ export default function CustomerPhoneNumbers() {
     friendlyName: "",
   });
 
+  const [editingNumber, setEditingNumber] = useState<{
+    id: number;
+    phoneNumber: string;
+    friendlyName: string;
+    assignedToEndpointId: number | null;
+    callHandler: string;
+    retellAgentId: string | null;
+  } | null>(null);
+  const [editForm, setEditForm] = useState({
+    friendlyName: "",
+    assignedToEndpointId: "",
+    callHandler: "",
+    retellAgentId: "",
+  });
+
   const { data: phoneNumbers, isLoading, refetch } = trpc.phoneNumbers.list.useQuery({ customerId });
   
   const createMutation = trpc.phoneNumbers.create.useMutation({
@@ -62,6 +78,17 @@ export default function CustomerPhoneNumbers() {
     },
   });
 
+  const updateMutation = trpc.phoneNumbers.update.useMutation({
+    onSuccess: () => {
+      toast.success("Phone number updated successfully");
+      setEditingNumber(null);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update phone number");
+    },
+  });
+
   const filteredNumbers = phoneNumbers?.filter(
     (n) =>
       n.phoneNumber.includes(searchQuery) ||
@@ -74,6 +101,41 @@ export default function CustomerPhoneNumbers() {
       return;
     }
     createMutation.mutate({ customerId, ...newNumber });
+  };
+
+  const handleEditOpen = (number: (typeof filteredNumbers)[number]) => {
+    setEditingNumber({
+      id: number.id,
+      phoneNumber: number.phoneNumber,
+      friendlyName: number.friendlyName || "",
+      assignedToEndpointId: number.assignedToEndpointId ?? null,
+      callHandler: number.callHandler || "texml_webhooks",
+      retellAgentId: (number as any).retellAgentId || null,
+    });
+    setEditForm({
+      friendlyName: number.friendlyName || "",
+      assignedToEndpointId: number.assignedToEndpointId?.toString() ?? "",
+      callHandler: number.callHandler || "texml_webhooks",
+      retellAgentId: (number as any).retellAgentId || "",
+    });
+  };
+
+  const handleEditSave = () => {
+    if (!editingNumber) return;
+    updateMutation.mutate({
+      id: editingNumber.id,
+      friendlyName: editForm.friendlyName || undefined,
+      assignedToEndpointId: editForm.assignedToEndpointId
+        ? Number(editForm.assignedToEndpointId)
+        : null,
+      callHandler: editForm.callHandler as
+        | "texml_webhooks"
+        | "call_control"
+        | "ai_agent"
+        | "sip_endpoint"
+        | "ring_group",
+      retellAgentId: editForm.retellAgentId || null,
+    });
   };
 
   return (
@@ -203,7 +265,7 @@ export default function CustomerPhoneNumbers() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => handleEditOpen(number)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -229,6 +291,81 @@ export default function CustomerPhoneNumbers() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Phone Number Dialog */}
+      <Dialog open={!!editingNumber} onOpenChange={(open) => { if (!open) setEditingNumber(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Phone Number</DialogTitle>
+            <DialogDescription>
+              Update settings for{" "}
+              <span className="font-mono">{editingNumber?.phoneNumber}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-friendlyName">Friendly Name</Label>
+              <Input
+                id="edit-friendlyName"
+                value={editForm.friendlyName}
+                onChange={(e) => setEditForm({ ...editForm, friendlyName: e.target.value })}
+                placeholder="Main Office Line"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-assignedToEndpointId">Assigned Endpoint ID</Label>
+              <Input
+                id="edit-assignedToEndpointId"
+                type="number"
+                value={editForm.assignedToEndpointId}
+                onChange={(e) => setEditForm({ ...editForm, assignedToEndpointId: e.target.value })}
+                placeholder="Leave blank to unassign"
+              />
+              <p className="text-xs text-muted-foreground">
+                Enter a SIP endpoint ID, or leave blank to unassign
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-callHandler">Call Handler</Label>
+              <Select
+                value={editForm.callHandler}
+                onValueChange={(value) => setEditForm({ ...editForm, callHandler: value })}
+              >
+                <SelectTrigger id="edit-callHandler">
+                  <SelectValue placeholder="Select call handler" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="texml_webhooks">TeXML Webhooks</SelectItem>
+                  <SelectItem value="call_control">Call Control</SelectItem>
+                  <SelectItem value="ai_agent">AI Agent</SelectItem>
+                  <SelectItem value="sip_endpoint">SIP Endpoint</SelectItem>
+                  <SelectItem value="ring_group">Ring Group</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-retellAgentId">Retell AI Agent ID</Label>
+              <Input
+                id="edit-retellAgentId"
+                placeholder="e.g., agent_xxxx (leave blank for none)"
+                value={editForm.retellAgentId}
+                onChange={(e) => setEditForm({ ...editForm, retellAgentId: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Assign a Retell AI agent to handle calls on this number. Get the ID from AI Agents page.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingNumber(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </CustomerLayout>
   );
 }

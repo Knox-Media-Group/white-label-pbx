@@ -42,6 +42,16 @@ export default function CustomerEndpoints() {
     callHandler: "texml_webhooks" as "texml_webhooks" | "call_control" | "ai_agent" | "video_room",
   });
 
+  type CallHandler = "texml_webhooks" | "call_control" | "ai_agent" | "video_room";
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingEndpointId, setEditingEndpointId] = useState<number | null>(null);
+  const [editEndpoint, setEditEndpoint] = useState({
+    displayName: "",
+    extensionNumber: "",
+    callerId: "",
+    callHandler: "texml_webhooks" as CallHandler,
+  });
+
   const { data: endpoints, isLoading, refetch } = trpc.sipEndpoints.list.useQuery({ customerId });
   
   const createMutation = trpc.sipEndpoints.create.useMutation({
@@ -66,6 +76,18 @@ export default function CustomerEndpoints() {
     },
   });
 
+  const updateMutation = trpc.sipEndpoints.update.useMutation({
+    onSuccess: () => {
+      toast.success("Endpoint updated successfully");
+      setIsEditOpen(false);
+      setEditingEndpointId(null);
+      refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to update endpoint");
+    },
+  });
+
   const filteredEndpoints = endpoints?.filter(
     (e) =>
       e.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -79,6 +101,22 @@ export default function CustomerEndpoints() {
       return;
     }
     createMutation.mutate({ customerId, ...newEndpoint });
+  };
+
+  const handleOpenEdit = (endpoint: typeof filteredEndpoints[number]) => {
+    setEditingEndpointId(endpoint.id);
+    setEditEndpoint({
+      displayName: endpoint.displayName || "",
+      extensionNumber: endpoint.extensionNumber || "",
+      callerId: endpoint.callerId || "",
+      callHandler: (endpoint.callHandler as CallHandler) || "texml_webhooks",
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (editingEndpointId === null) return;
+    updateMutation.mutate({ id: editingEndpointId, ...editEndpoint });
   };
 
   return (
@@ -178,6 +216,74 @@ export default function CustomerEndpoints() {
           </Dialog>
         </div>
 
+        {/* Edit Endpoint Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit SIP Endpoint</DialogTitle>
+              <DialogDescription>
+                Update the details for this SIP endpoint
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-displayName">Display Name</Label>
+                <Input
+                  id="edit-displayName"
+                  value={editEndpoint.displayName}
+                  onChange={(e) => setEditEndpoint({ ...editEndpoint, displayName: e.target.value })}
+                  placeholder="John Smith"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-extension">Extension Number</Label>
+                <Input
+                  id="edit-extension"
+                  value={editEndpoint.extensionNumber}
+                  onChange={(e) => setEditEndpoint({ ...editEndpoint, extensionNumber: e.target.value })}
+                  placeholder="1001"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-callerId">Caller ID</Label>
+                <Input
+                  id="edit-callerId"
+                  value={editEndpoint.callerId}
+                  onChange={(e) => setEditEndpoint({ ...editEndpoint, callerId: e.target.value })}
+                  placeholder="+15551234567"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-callHandler">Call Handler</Label>
+                <Select
+                  value={editEndpoint.callHandler}
+                  onValueChange={(value) =>
+                    setEditEndpoint({ ...editEndpoint, callHandler: value as CallHandler })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="texml_webhooks">TeXML Webhooks</SelectItem>
+                    <SelectItem value="call_control">Call Control</SelectItem>
+                    <SelectItem value="ai_agent">AI Agent</SelectItem>
+                    <SelectItem value="video_room">Video Room</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveEdit} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Endpoints Table */}
         <Card>
           <CardHeader>
@@ -240,7 +346,7 @@ export default function CustomerEndpoints() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => handleOpenEdit(endpoint)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
