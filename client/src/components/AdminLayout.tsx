@@ -19,7 +19,8 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot, Ship, BookOpen } from "lucide-react";
+import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot, Ship, BookOpen, MessageSquare, Hash } from "lucide-react";
+import DemoWalkthrough from "@/components/DemoWalkthrough";
 import { CSSProperties, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "./ui/button";
@@ -30,6 +31,8 @@ const menuItems = [
   { icon: Users, label: "Customers", path: "/admin/customers" },
   { icon: PhoneCall, label: "Phone Numbers", path: "/admin/phone-numbers" },
   { icon: Headphones, label: "SIP Endpoints", path: "/admin/sip-endpoints" },
+  { icon: Hash, label: "Extensions", path: "/admin/extensions" },
+  { icon: MessageSquare, label: "Messaging", path: "/admin/messaging" },
   { icon: Bot, label: "AI Agents", path: "/admin/ai-agents" },
   { icon: Ship, label: "Number Porting", path: "/admin/porting" },
   { icon: ArrowLeftRight, label: "Import", path: "/admin/import" },
@@ -166,6 +169,7 @@ export default function AdminLayout({
           {children}
         </main>
       </SidebarInset>
+      <DemoWalkthrough />
     </SidebarProvider>
   );
 }

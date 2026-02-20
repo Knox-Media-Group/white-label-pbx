@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings as SettingsIcon, Key, Globe, Bot, MessageSquare, Phone } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Settings as SettingsIcon, Key, Globe, Bot, MessageSquare, Phone, Plus, Trash2, Package } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { useState, useEffect } from "react";
@@ -302,7 +304,156 @@ export default function AdminSettings() {
             </Button>
           </CardContent>
         </Card>
+        {/* Service Plans Management */}
+        <ServicePlansManager />
       </div>
     </AdminLayout>
+  );
+}
+
+function ServicePlansManager() {
+  const { data: plans, refetch } = trpc.servicePlans.list.useQuery();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newPlan, setNewPlan] = useState({
+    name: "", description: "", monthlyPrice: "0",
+    includedMinutes: "0", includedNumbers: "1", includedEndpoints: "5", includedSms: "0",
+  });
+
+  const createMutation = trpc.servicePlans.create.useMutation({
+    onSuccess: () => { toast.success("Plan created"); setIsCreateOpen(false); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const deleteMutation = trpc.servicePlans.delete.useMutation({
+    onSuccess: () => { toast.success("Plan deleted"); refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Service Plans
+            </CardTitle>
+            <CardDescription>Manage pricing tiers for customer accounts</CardDescription>
+          </div>
+          <Button onClick={() => setIsCreateOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Add Plan
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Price/mo</TableHead>
+              <TableHead>Minutes</TableHead>
+              <TableHead>Numbers</TableHead>
+              <TableHead>Endpoints</TableHead>
+              <TableHead>SMS</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {plans?.map((plan) => (
+              <TableRow key={plan.id}>
+                <TableCell className="font-medium">{plan.name}</TableCell>
+                <TableCell>${((plan.monthlyPrice || 0) / 100).toFixed(2)}</TableCell>
+                <TableCell>{plan.includedMinutes || 0}</TableCell>
+                <TableCell>{plan.includedNumbers || 0}</TableCell>
+                <TableCell>{plan.includedEndpoints || 0}</TableCell>
+                <TableCell>{plan.includedSms || 0}</TableCell>
+                <TableCell>
+                  <Badge variant={plan.isActive ? "default" : "secondary"}>
+                    {plan.isActive ? "Active" : "Inactive"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm("Delete this plan?")) deleteMutation.mutate({ id: plan.id });
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {(!plans || plans.length === 0) && (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                  No plans configured. Create your first service plan.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Service Plan</DialogTitle>
+            <DialogDescription>Define a new pricing tier for customers</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label>Plan Name</Label>
+              <Input value={newPlan.name} onChange={(e) => setNewPlan({ ...newPlan, name: e.target.value })} placeholder="e.g. Basic, Pro, Enterprise" />
+            </div>
+            <div className="grid gap-2">
+              <Label>Description</Label>
+              <Input value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} placeholder="Short description" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Monthly Price (cents)</Label>
+                <Input type="number" value={newPlan.monthlyPrice} onChange={(e) => setNewPlan({ ...newPlan, monthlyPrice: e.target.value })} />
+                <p className="text-xs text-muted-foreground">${(parseInt(newPlan.monthlyPrice || "0") / 100).toFixed(2)}/mo</p>
+              </div>
+              <div className="grid gap-2">
+                <Label>Included Minutes</Label>
+                <Input type="number" value={newPlan.includedMinutes} onChange={(e) => setNewPlan({ ...newPlan, includedMinutes: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Included Numbers</Label>
+                <Input type="number" value={newPlan.includedNumbers} onChange={(e) => setNewPlan({ ...newPlan, includedNumbers: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Included Endpoints</Label>
+                <Input type="number" value={newPlan.includedEndpoints} onChange={(e) => setNewPlan({ ...newPlan, includedEndpoints: e.target.value })} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Included SMS</Label>
+                <Input type="number" value={newPlan.includedSms} onChange={(e) => setNewPlan({ ...newPlan, includedSms: e.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
+            <Button
+              disabled={!newPlan.name || createMutation.isPending}
+              onClick={() => createMutation.mutate({
+                name: newPlan.name,
+                description: newPlan.description || undefined,
+                monthlyPrice: parseInt(newPlan.monthlyPrice) || 0,
+                includedMinutes: parseInt(newPlan.includedMinutes) || 0,
+                includedNumbers: parseInt(newPlan.includedNumbers) || 1,
+                includedEndpoints: parseInt(newPlan.includedEndpoints) || 5,
+                includedSms: parseInt(newPlan.includedSms) || 0,
+              })}
+            >
+              {createMutation.isPending ? "Creating..." : "Create Plan"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

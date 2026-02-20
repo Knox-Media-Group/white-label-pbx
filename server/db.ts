@@ -18,6 +18,8 @@ import {
   systemSettings, InsertSystemSetting, SystemSetting,
   retellAgents, InsertRetellAgent, RetellAgent,
   portOrders, InsertPortOrder, PortOrder,
+  servicePlans, InsertServicePlan, ServicePlan,
+  smsMessages, InsertSmsMessage, SmsMessage,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -653,4 +655,84 @@ export async function deletePortOrder(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(portOrders).where(eq(portOrders.id, id));
+}
+
+// ============ SERVICE PLAN OPERATIONS ============
+export async function createServicePlan(plan: InsertServicePlan): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(servicePlans).values(plan).returning({ id: servicePlans.id });
+  return result[0].id;
+}
+
+export async function getServicePlanById(id: number): Promise<ServicePlan | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(servicePlans).where(eq(servicePlans.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getAllServicePlans(): Promise<ServicePlan[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(servicePlans).orderBy(desc(servicePlans.createdAt));
+}
+
+export async function getActiveServicePlans(): Promise<ServicePlan[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(servicePlans).where(eq(servicePlans.isActive, true)).orderBy(servicePlans.name);
+}
+
+export async function updateServicePlan(id: number, data: Partial<InsertServicePlan>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(servicePlans).set({ ...data, updatedAt: new Date() }).where(eq(servicePlans.id, id));
+}
+
+export async function deleteServicePlan(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(servicePlans).where(eq(servicePlans.id, id));
+}
+
+// ============ SMS MESSAGE OPERATIONS ============
+export async function createSmsMessage(msg: InsertSmsMessage): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(smsMessages).values(msg).returning({ id: smsMessages.id });
+  return result[0].id;
+}
+
+export async function getSmsMessagesByCustomer(customerId: number, limit = 100): Promise<SmsMessage[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(smsMessages).where(eq(smsMessages.customerId, customerId)).orderBy(desc(smsMessages.createdAt)).limit(limit);
+}
+
+export async function getSmsConversation(customerId: number, contactNumber: string, limit = 50): Promise<SmsMessage[]> {
+  const db = await getDb();
+  if (!db) return [];
+  // Get messages where fromNumber or toNumber matches contactNumber for this customer
+  const allMsgs = await db.select().from(smsMessages)
+    .where(eq(smsMessages.customerId, customerId))
+    .orderBy(desc(smsMessages.createdAt))
+    .limit(500);
+  return allMsgs
+    .filter(m => m.fromNumber === contactNumber || m.toNumber === contactNumber)
+    .slice(0, limit)
+    .reverse(); // chronological order
+}
+
+export async function updateSmsMessage(id: number, data: Partial<InsertSmsMessage>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(smsMessages).set(data).where(eq(smsMessages.id, id));
+}
+
+export async function getSmsMessageByTelnyxId(telnyxMessageId: string): Promise<SmsMessage | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(smsMessages).where(eq(smsMessages.telnyxMessageId, telnyxMessageId)).limit(1);
+  return result[0];
 }

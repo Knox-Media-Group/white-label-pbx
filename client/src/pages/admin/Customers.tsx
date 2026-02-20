@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { Plus, Search, MoreHorizontal, Eye, Trash2 } from "lucide-react";
 import { useLocation } from "wouter";
@@ -34,14 +35,17 @@ export default function AdminCustomers() {
     companyName: "",
     email: "",
     phone: "",
+    planId: "",
+    assignPhoneNumber: "",
   });
 
   const { data: customers, isLoading, refetch } = trpc.customers.list.useQuery();
+  const { data: plans } = trpc.servicePlans.listActive.useQuery();
   const createMutation = trpc.customers.create.useMutation({
     onSuccess: () => {
       toast.success("Customer created successfully");
       setIsCreateOpen(false);
-      setNewCustomer({ name: "", companyName: "", email: "", phone: "" });
+      setNewCustomer({ name: "", companyName: "", email: "", phone: "", planId: "", assignPhoneNumber: "" });
       refetch();
     },
     onError: (error) => {
@@ -70,7 +74,11 @@ export default function AdminCustomers() {
       toast.error("Name and email are required");
       return;
     }
-    createMutation.mutate(newCustomer);
+    createMutation.mutate({
+      ...newCustomer,
+      planId: newCustomer.planId ? parseInt(newCustomer.planId) : undefined,
+      assignPhoneNumber: newCustomer.assignPhoneNumber || undefined,
+    });
   };
 
   return (
@@ -139,6 +147,33 @@ export default function AdminCustomers() {
                     placeholder="+1 555 123 4567"
                   />
                 </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="planId">Service Plan</Label>
+                  <Select
+                    value={newCustomer.planId}
+                    onValueChange={(value) => setNewCustomer({ ...newCustomer, planId: value })}
+                  >
+                    <SelectTrigger id="planId" className="w-full">
+                      <SelectValue placeholder="Select a plan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {plans?.map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id.toString()}>
+                          {plan.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="assignPhoneNumber">Assign Phone Number (optional)</Label>
+                  <Input
+                    id="assignPhoneNumber"
+                    value={newCustomer.assignPhoneNumber}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, assignPhoneNumber: e.target.value })}
+                    placeholder="+1XXXXXXXXXX"
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
@@ -180,6 +215,7 @@ export default function AdminCustomers() {
                     <TableHead>Name</TableHead>
                     <TableHead>Company</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Plan</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="w-12"></TableHead>
@@ -199,6 +235,9 @@ export default function AdminCustomers() {
                       </TableCell>
                       <TableCell onClick={() => setLocation(`/admin/customers/${customer.id}`)}>
                         {customer.email}
+                      </TableCell>
+                      <TableCell onClick={() => setLocation(`/admin/customers/${customer.id}`)}>
+                        {plans?.find((p) => p.id === customer.planId)?.name || "-"}
                       </TableCell>
                       <TableCell onClick={() => setLocation(`/admin/customers/${customer.id}`)}>
                         <span className={`text-xs px-2 py-1 rounded-full ${

@@ -171,6 +171,8 @@ export const appRouter = router({
         email: z.string().email(),
         phone: z.string().optional(),
         notes: z.string().optional(),
+        planId: z.number().optional(),
+        assignPhoneNumber: z.string().optional(), // E.164 phone number to assign
       }))
       .mutation(async ({ input }) => {
         const id = await db.createCustomer({
@@ -179,8 +181,21 @@ export const appRouter = router({
           email: input.email,
           phone: input.phone || null,
           notes: input.notes || null,
+          planId: input.planId || null,
           status: 'active',
         });
+        // If a phone number was specified, create a phone number record for this customer
+        if (input.assignPhoneNumber) {
+          await db.createPhoneNumber({
+            customerId: id,
+            phoneNumber: input.assignPhoneNumber,
+            friendlyName: `${input.name} - Main`,
+            voiceEnabled: true,
+            smsEnabled: true,
+            callHandler: 'texml_webhooks',
+            status: 'active',
+          });
+        }
         return { id };
       }),
     
@@ -196,6 +211,7 @@ export const appRouter = router({
         telnyxConnectionId: z.string().optional(),
         telnyxApiKey: z.string().optional(),
         telnyxMessagingProfileId: z.string().optional(),
+        planId: z.number().nullable().optional(),
         // SMS Summary settings
         smsSummaryEnabled: z.boolean().optional(),
         notificationPhone: z.string().optional(),
@@ -206,9 +222,10 @@ export const appRouter = router({
           throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
         }
         const { id, ...data } = input;
-        // Non-admins cannot change status or Telnyx credentials
+        // Non-admins cannot change status, plan, or Telnyx credentials
         if (ctx.user.role !== 'admin') {
           delete (data as any).status;
+          delete (data as any).planId;
           delete (data as any).telnyxConnectionId;
           delete (data as any).telnyxApiKey;
           delete (data as any).telnyxMessagingProfileId;
@@ -1627,6 +1644,143 @@ Example output:
       }).optional())
       .query(async ({ input }) => {
         return retell.listCalls(input);
+      }),
+  }),
+
+  // ============ SERVICE PLANS ============
+  servicePlans: router({
+    list: adminProcedure.query(async () => {
+      return db.getAllServicePlans();
+    }),
+
+    listActive: protectedProcedure.query(async () => {
+      return db.getActiveServicePlans();
+    }),
+
+    getById: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getServicePlanById(input.id);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        description: z.string().optional(),
+        monthlyPrice: z.number().min(0).default(0),
+        includedMinutes: z.number().min(0).default(0),
+        includedNumbers: z.number().min(0).default(1),
+        includedEndpoints: z.number().min(0).default(5),
+        includedSms: z.number().min(0).default(0),
+        features: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const id = await db.createServicePlan({
+          name: input.name,
+          description: input.description || null,
+          monthlyPrice: input.monthlyPrice,
+          includedMinutes: input.includedMinutes,
+          includedNumbers: input.includedNumbers,
+          includedEndpoints: input.includedEndpoints,
+          includedSms: input.includedSms,
+          features: input.features || null,
+          isActive: true,
+        });
+        return { id };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        monthlyPrice: z.number().min(0).optional(),
+        includedMinutes: z.number().min(0).optional(),
+        includedNumbers: z.number().min(0).optional(),
+        includedEndpoints: z.number().min(0).optional(),
+        includedSms: z.number().min(0).optional(),
+        features: z.array(z.string()).optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, ...data } = input;
+        await db.updateServicePlan(id, data);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteServicePlan(input.id);
+        return { success: true };
+      }),
+  }),
+
+  // ============ SMS MESSAGING ============
+  sms: router({
+    list: customerProcedure
+      .input(z.object({ customerId: z.number(), limit: z.number().optional() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getSmsMessagesByCustomer(input.customerId, input.limit || 100);
+      }),
+
+    conversation: customerProcedure
+      .input(z.object({ customerId: z.number(), contactNumber: z.string() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getSmsConversation(input.customerId, input.contactNumber);
+      }),
+
+    send: customerProcedure
+      .input(z.object({
+        customerId: z.number(),
+        fromNumber: z.string(),
+        toNumber: z.string(),
+        body: z.string().min(1),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        try {
+          // Send via Telnyx
+          const result = await telnyx.sendSms({
+            from: input.fromNumber,
+            to: input.toNumber,
+            body: input.body,
+          });
+          // Store in DB
+          const id = await db.createSmsMessage({
+            customerId: input.customerId,
+            telnyxMessageId: result?.data?.id || null,
+            fromNumber: input.fromNumber,
+            toNumber: input.toNumber,
+            body: input.body,
+            direction: 'outbound',
+            status: 'sent',
+          });
+          return { id, telnyxMessageId: result?.data?.id };
+        } catch (error: any) {
+          // Still store the failed message
+          await db.createSmsMessage({
+            customerId: input.customerId,
+            fromNumber: input.fromNumber,
+            toNumber: input.toNumber,
+            body: input.body,
+            direction: 'outbound',
+            status: 'failed',
+            errorMessage: error.message,
+          });
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: `Failed to send SMS: ${error.message}`,
+          });
+        }
       }),
   }),
 });

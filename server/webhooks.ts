@@ -790,4 +790,50 @@ webhookRouter.post("/retell", async (req: Request, res: Response) => {
   }
 });
 
+// ============ INBOUND SMS WEBHOOK ============
+webhookRouter.post("/sms", async (req: Request, res: Response) => {
+  try {
+    const payload = req.body?.data?.payload || req.body;
+    const direction = payload?.direction || "inbound";
+    const from = payload?.from?.phone_number || payload?.from || "";
+    const to = payload?.to?.[0]?.phone_number || payload?.to || "";
+    const body = payload?.text || payload?.body || "";
+    const messageId = payload?.id || "";
+    const status = payload?.status || (direction === "inbound" ? "received" : "delivered");
+
+    if (!from || !to) {
+      console.log("[SMS Webhook] Missing from/to, skipping");
+      res.status(200).send("OK");
+      return;
+    }
+
+    // Find which customer owns the destination number
+    const targetNumber = direction === "inbound" ? to : from;
+    const phoneRecord = await db.getPhoneNumberByNumber(targetNumber);
+
+    if (!phoneRecord) {
+      console.log(`[SMS Webhook] No customer found for number ${targetNumber}`);
+      res.status(200).send("OK");
+      return;
+    }
+
+    // Store the message
+    await db.createSmsMessage({
+      customerId: phoneRecord.customerId,
+      telnyxMessageId: messageId,
+      fromNumber: from,
+      toNumber: to,
+      body,
+      direction: direction === "inbound" ? "inbound" : "outbound",
+      status: status === "received" ? "received" : "delivered",
+    });
+
+    console.log(`[SMS Webhook] Stored ${direction} SMS for customer ${phoneRecord.customerId}: ${from} -> ${to}`);
+    res.status(200).send("OK");
+  } catch (error) {
+    console.error("[SMS Webhook] Error:", error);
+    res.status(500).send("Error");
+  }
+});
+
 export default webhookRouter;

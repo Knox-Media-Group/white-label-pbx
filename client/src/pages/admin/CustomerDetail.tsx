@@ -21,6 +21,7 @@ export default function AdminCustomerDetail() {
   const { data: endpoints } = trpc.sipEndpoints.list.useQuery({ customerId });
   const { data: phoneNumbers } = trpc.phoneNumbers.list.useQuery({ customerId });
   const { data: ringGroups } = trpc.ringGroups.list.useQuery({ customerId });
+  const { data: plans } = trpc.servicePlans.listActive.useQuery();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -34,6 +35,7 @@ export default function AdminCustomerDetail() {
     brandingLogo: "",
     brandingPrimaryColor: "#6366f1",
     brandingCompanyName: "",
+    planId: null as number | null,
   });
 
   useEffect(() => {
@@ -50,6 +52,7 @@ export default function AdminCustomerDetail() {
         brandingLogo: customer.brandingLogo || "",
         brandingPrimaryColor: customer.brandingPrimaryColor || "#6366f1",
         brandingCompanyName: customer.brandingCompanyName || "",
+        planId: (customer as any).planId ?? null,
       });
     }
   }, [customer]);
@@ -214,6 +217,27 @@ export default function AdminCustomerDetail() {
                         <SelectItem value="active">Active</SelectItem>
                         <SelectItem value="suspended">Suspended</SelectItem>
                         <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="planId">Service Plan</Label>
+                    <Select
+                      value={formData.planId?.toString() || "none"}
+                      onValueChange={(value) =>
+                        setFormData({ ...formData, planId: value === "none" ? null : parseInt(value) })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="No plan assigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No plan assigned</SelectItem>
+                        {plans?.map((plan) => (
+                          <SelectItem key={plan.id} value={plan.id.toString()}>
+                            {plan.name} — ${((plan.monthlyPrice || 0) / 100).toFixed(2)}/mo
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

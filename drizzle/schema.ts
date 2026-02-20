@@ -54,6 +54,8 @@ export const customers = pgTable("customers", {
   telnyxConnectionId: varchar("telnyxConnectionId", { length: 64 }),
   telnyxApiKey: text("telnyxApiKey"),
   telnyxMessagingProfileId: varchar("telnyxMessagingProfileId", { length: 255 }),
+  // Plan assignment
+  planId: integer("planId"),
   // Retell AI integration
   retellApiKey: text("retellApiKey"),
   // Branding settings
@@ -384,3 +386,50 @@ export const portOrders = pgTable("portOrders", {
 
 export type PortOrder = typeof portOrders.$inferSelect;
 export type InsertPortOrder = typeof portOrders.$inferInsert;
+
+/**
+ * Service Plans - pricing tiers customers can be assigned to
+ */
+export const servicePlans = pgTable("servicePlans", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  monthlyPrice: integer("monthlyPrice").default(0), // in cents
+  includedMinutes: integer("includedMinutes").default(0),
+  includedNumbers: integer("includedNumbers").default(1),
+  includedEndpoints: integer("includedEndpoints").default(5),
+  includedSms: integer("includedSms").default(0),
+  features: jsonb("features"), // e.g. ["voicemail","recording","ai_agent"]
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type ServicePlan = typeof servicePlans.$inferSelect;
+export type InsertServicePlan = typeof servicePlans.$inferInsert;
+
+/**
+ * SMS Messages - tracks all inbound and outbound text messages
+ */
+export const smsDirectionEnum = pgEnum("sms_direction", ["inbound", "outbound"]);
+export const smsStatusEnum = pgEnum("sms_status", ["queued", "sent", "delivered", "failed", "received"]);
+
+export const smsMessages = pgTable("smsMessages", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customerId").notNull(),
+  telnyxMessageId: varchar("telnyxMessageId", { length: 128 }),
+  fromNumber: varchar("fromNumber", { length: 32 }).notNull(),
+  toNumber: varchar("toNumber", { length: 32 }).notNull(),
+  body: text("body"),
+  direction: smsDirectionEnum("direction").notNull(),
+  status: smsStatusEnum("smsStatus").default("queued").notNull(),
+  mediaUrls: jsonb("mediaUrls"),
+  segments: integer("segments").default(1),
+  errorCode: varchar("errorCode", { length: 32 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SmsMessage = typeof smsMessages.$inferSelect;
+export type InsertSmsMessage = typeof smsMessages.$inferInsert;
+
