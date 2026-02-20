@@ -64,7 +64,7 @@ export const appRouter = router({
           email: input.email,
           phone: input.phone || null,
           notes: input.notes || null,
-          status: 'pending',
+          status: 'active',
         });
         return { id };
       }),

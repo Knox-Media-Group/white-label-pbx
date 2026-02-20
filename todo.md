@@ -102,7 +102,7 @@
 - [x] Recording search and filtering
 
 ## Bug Fixes
-- [ ] Fix customer status stuck on 'pending' - should be 'active' after creation
+- [x] Fix customer status stuck on 'pending' - should be 'active' after creation
 - [x] Fix AI call handling not transferring calls when caller asks for sales/departments
 
 ## SMS Call Summary Feature
