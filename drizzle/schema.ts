@@ -4,9 +4,9 @@ import { integer, pgEnum, pgTable, text, timestamp, varchar, boolean, jsonb, ser
 export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
 export const customerStatusEnum = pgEnum("customer_status", ["active", "suspended", "pending", "cancelled"]);
 export const sipEndpointStatusEnum = pgEnum("sip_endpoint_status", ["active", "inactive", "provisioning"]);
-export const sipCallHandlerEnum = pgEnum("sip_call_handler", ["laml_webhooks", "relay_context", "relay_topic", "ai_agent", "video_room"]);
+export const sipCallHandlerEnum = pgEnum("sip_call_handler", ["texml_webhooks", "call_control", "ai_agent", "video_room"]);
 export const httpMethodEnum = pgEnum("http_method", ["GET", "POST"]);
-export const phoneCallHandlerEnum = pgEnum("phone_call_handler", ["laml_webhooks", "relay_context", "relay_topic", "ai_agent", "sip_endpoint", "ring_group"]);
+export const phoneCallHandlerEnum = pgEnum("phone_call_handler", ["texml_webhooks", "call_control", "ai_agent", "sip_endpoint", "ring_group"]);
 export const phoneStatusEnum = pgEnum("phone_status", ["active", "inactive", "porting"]);
 export const ringGroupStrategyEnum = pgEnum("ring_group_strategy", ["simultaneous", "sequential", "round_robin", "random"]);
 export const failoverActionEnum = pgEnum("failover_action", ["voicemail", "forward", "hangup"]);
@@ -49,10 +49,10 @@ export const customers = pgTable("customers", {
   email: varchar("email", { length: 320 }).notNull(),
   phone: varchar("phone", { length: 32 }),
   status: customerStatusEnum("status").default("pending").notNull(),
-  // SignalWire subproject integration
-  signalwireSubprojectSid: varchar("signalwireSubprojectSid", { length: 64 }),
-  signalwireApiToken: text("signalwireApiToken"),
-  signalwireSpaceUrl: varchar("signalwireSpaceUrl", { length: 255 }),
+  // Telnyx integration
+  telnyxConnectionId: varchar("telnyxConnectionId", { length: 64 }),
+  telnyxApiKey: text("telnyxApiKey"),
+  telnyxMessagingProfileId: varchar("telnyxMessagingProfileId", { length: 255 }),
   // Branding settings
   brandingLogo: text("brandingLogo"),
   brandingPrimaryColor: varchar("brandingPrimaryColor", { length: 7 }).default("#6366f1"),
@@ -77,7 +77,7 @@ export type InsertCustomer = typeof customers.$inferInsert;
 export const sipEndpoints = pgTable("sipEndpoints", {
   id: serial("id").primaryKey(),
   customerId: integer("customerId").notNull(),
-  signalwireEndpointId: varchar("signalwireEndpointId", { length: 64 }),
+  telnyxCredentialId: varchar("telnyxCredentialId", { length: 64 }),
   username: varchar("username", { length: 64 }).notNull(),
   password: text("password"),
   callerId: varchar("callerId", { length: 64 }),
@@ -86,10 +86,10 @@ export const sipEndpoints = pgTable("sipEndpoints", {
   extensionNumber: varchar("extensionNumber", { length: 16 }),
   status: sipEndpointStatusEnum("status").default("provisioning").notNull(),
   // Call handler configuration
-  callHandler: sipCallHandlerEnum("callHandler").default("laml_webhooks"),
+  callHandler: sipCallHandlerEnum("callHandler").default("texml_webhooks"),
   callRequestUrl: text("callRequestUrl"),
   callRequestMethod: httpMethodEnum("callRequestMethod").default("POST"),
-  callRelayContext: varchar("callRelayContext", { length: 64 }),
+  callControlAppId: varchar("callControlAppId", { length: 64 }),
   callAiAgentId: varchar("callAiAgentId", { length: 64 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -104,7 +104,7 @@ export type InsertSipEndpoint = typeof sipEndpoints.$inferInsert;
 export const phoneNumbers = pgTable("phoneNumbers", {
   id: serial("id").primaryKey(),
   customerId: integer("customerId").notNull(),
-  signalwirePhoneNumberSid: varchar("signalwirePhoneNumberSid", { length: 64 }),
+  telnyxPhoneNumberId: varchar("telnyxPhoneNumberId", { length: 64 }),
   phoneNumber: varchar("phoneNumber", { length: 32 }).notNull(),
   friendlyName: varchar("friendlyName", { length: 128 }),
   voiceEnabled: boolean("voiceEnabled").default(true),
@@ -114,9 +114,9 @@ export const phoneNumbers = pgTable("phoneNumbers", {
   assignedToEndpointId: integer("assignedToEndpointId"),
   assignedToRingGroupId: integer("assignedToRingGroupId"),
   // Call handler
-  callHandler: phoneCallHandlerEnum("callHandler").default("laml_webhooks"),
+  callHandler: phoneCallHandlerEnum("callHandler").default("texml_webhooks"),
   callRequestUrl: text("callRequestUrl"),
-  callRelayContext: varchar("callRelayContext", { length: 64 }),
+  callControlAppId: varchar("callControlAppId", { length: 64 }),
   status: phoneStatusEnum("status").default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),

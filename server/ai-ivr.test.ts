@@ -101,26 +101,26 @@ describe("AI IVR - Available Departments", () => {
   });
 });
 
-describe("AI IVR - LaML Generation", () => {
-  it("should generate valid AI IVR LaML with speech gather", () => {
-    const laml = aiIvr.generateAiIvrLaml({
+describe("AI IVR - TeXML Generation", () => {
+  it("should generate valid AI IVR TeXML with speech gather", () => {
+    const texml = aiIvr.generateAiIvrTeXml({
       customerId: 1,
       greeting: "Hello, how can I help?",
       gatherTimeout: 5,
       webhookUrl: "https://example.com",
     });
 
-    expect(laml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(laml).toContain("<Response>");
-    expect(laml).toContain("<Gather");
-    expect(laml).toContain('input="speech"');
-    expect(laml).toContain("Hello, how can I help?");
-    expect(laml).toContain("/api/webhooks/ai-gather");
+    expect(texml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(texml).toContain("<Response>");
+    expect(texml).toContain("<Gather");
+    expect(texml).toContain('input="speech"');
+    expect(texml).toContain("Hello, how can I help?");
+    expect(texml).toContain("/api/webhooks/ai-gather");
   });
 
-  it("should generate valid transfer to ring group LaML", () => {
-    const laml = aiIvr.generateTransferToRingGroupLaml(
-      ["sip:ext101@test.signalwire.com", "sip:ext102@test.signalwire.com"],
+  it("should generate valid transfer to ring group TeXML", () => {
+    const texml = aiIvr.generateTransferToRingGroupTeXml(
+      ["sip:ext101@sip.telnyx.com", "sip:ext102@sip.telnyx.com"],
       {
         strategy: "simultaneous",
         timeout: 30,
@@ -128,54 +128,54 @@ describe("AI IVR - LaML Generation", () => {
       }
     );
 
-    expect(laml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(laml).toContain("<Response>");
-    expect(laml).toContain("<Dial");
-    expect(laml).toContain("<Sip>sip:ext101@test.signalwire.com</Sip>");
-    expect(laml).toContain("<Sip>sip:ext102@test.signalwire.com</Sip>");
-    expect(laml).toContain("Transferring to Sales");
+    expect(texml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(texml).toContain("<Response>");
+    expect(texml).toContain("<Dial");
+    expect(texml).toContain("<Sip>sip:ext101@sip.telnyx.com</Sip>");
+    expect(texml).toContain("<Sip>sip:ext102@sip.telnyx.com</Sip>");
+    expect(texml).toContain("Transferring to Sales");
   });
 
-  it("should generate valid transfer to endpoint LaML", () => {
-    const laml = aiIvr.generateTransferToEndpointLaml(
-      "sip:ext101@test.signalwire.com",
+  it("should generate valid transfer to endpoint TeXML", () => {
+    const texml = aiIvr.generateTransferToEndpointTeXml(
+      "sip:ext101@sip.telnyx.com",
       {
         timeout: 30,
         announcement: "Connecting you now",
       }
     );
 
-    expect(laml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(laml).toContain("<Response>");
-    expect(laml).toContain("<Dial");
-    expect(laml).toContain("<Sip>sip:ext101@test.signalwire.com</Sip>");
-    expect(laml).toContain("Connecting you now");
+    expect(texml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(texml).toContain("<Response>");
+    expect(texml).toContain("<Dial");
+    expect(texml).toContain("<Sip>sip:ext101@sip.telnyx.com</Sip>");
+    expect(texml).toContain("Connecting you now");
   });
 
-  it("should generate retry LaML with attempt counter", () => {
-    const laml = aiIvr.generateRetryLaml(
+  it("should generate retry TeXML with attempt counter", () => {
+    const texml = aiIvr.generateRetryTeXml(
       "I didn't understand. Please try again.",
       "https://example.com",
       1,
       2
     );
 
-    expect(laml).toContain("<Gather");
-    expect(laml).toContain("attempt=3");
-    expect(laml).toContain("I didn't understand. Please try again.");
+    expect(texml).toContain("<Gather");
+    expect(texml).toContain("attempt=3");
+    expect(texml).toContain("I didn't understand. Please try again.");
   });
 
-  it("should generate fallback LaML after max attempts", () => {
-    const laml = aiIvr.generateRetryLaml(
+  it("should generate fallback TeXML after max attempts", () => {
+    const texml = aiIvr.generateRetryTeXml(
       "I didn't understand.",
       "https://example.com",
       1,
       3
     );
 
-    expect(laml).toContain("<Redirect>");
-    expect(laml).toContain("ai-fallback");
-    expect(laml).not.toContain("<Gather");
+    expect(texml).toContain("<Redirect>");
+    expect(texml).toContain("ai-fallback");
+    expect(texml).not.toContain("<Gather");
   });
 });
 

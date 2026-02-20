@@ -1,11 +1,11 @@
 /**
- * SignalWire Webhook Handlers
- * Handles incoming call events and generates LaML responses
+ * Telnyx Webhook Handlers
+ * Handles incoming call events and generates TeXML responses
  */
 
 import { Router, Request, Response } from "express";
 import * as db from "./db";
-import { generateLamlDial, generateLamlRingGroup, generateLamlVoicemail } from "./signalwire";
+import { generateTeXmlDial, generateTeXmlRingGroup, generateTeXmlVoicemail, getSipDomain } from "./telnyx";
 import * as aiIvr from "./ai-ivr";
 import * as callSummary from "./call-summary";
 import { storagePut } from "./storage";
@@ -13,8 +13,7 @@ import { nanoid } from "nanoid";
 
 export const webhookRouter = Router();
 
-// Note: Body parsing is handled by express.urlencoded() in index.ts
-// No additional middleware needed here
+// Note: Body parsing is handled by express.urlencoded() and express.json() in index.ts
 
 // Helper to parse JSON fields that may come as string or already parsed
 function parseJsonArray(value: unknown): number[] {
@@ -31,20 +30,40 @@ function parseJsonArray(value: unknown): number[] {
   return [];
 }
 
-// Get the correct SIP domain for SignalWire
-// Format: {space}-{last_part_of_project_id}.sip.signalwire.com
-function getSipDomain(): string {
-  const spaceUrl = process.env.SIGNALWIRE_SPACE_URL || '';
-  const projectId = process.env.SIGNALWIRE_PROJECT_ID || '';
+/**
+ * Extract call data from webhook payload.
+ * Telnyx TeXML webhooks use TwiML-compatible field names (CallSid, From, To, etc.)
+ * Telnyx Call Control webhooks use a different JSON structure.
+ * This handler supports both formats.
+ */
+function extractCallData(body: Record<string, unknown>): {
+  callSid: string;
+  from: string;
+  to: string;
+  direction: string;
+  callStatus: string;
+} {
+  // TeXML format (TwiML-compatible) — comes as form-urlencoded
+  if (body.CallSid) {
+    return {
+      callSid: String(body.CallSid),
+      from: String(body.From || ""),
+      to: String(body.To || ""),
+      direction: String(body.Direction || "inbound"),
+      callStatus: String(body.CallStatus || ""),
+    };
+  }
 
-  // Extract space name from URL (e.g., "knoxlandin" from "knoxlandin.signalwire.com")
-  const spaceName = spaceUrl.replace('.signalwire.com', '');
-
-  // Get the last segment of the project ID for the SIP domain
-  const projectIdParts = projectId.split('-');
-  const lastPart = projectIdParts[projectIdParts.length - 1];
-
-  return `${spaceName}-${lastPart}.sip.signalwire.com`;
+  // Telnyx Call Control webhook format (JSON)
+  const data = (body.data as Record<string, unknown>) || body;
+  const payload = (data.payload as Record<string, unknown>) || {};
+  return {
+    callSid: String(payload.call_control_id || payload.call_session_id || ""),
+    from: String(payload.from || ""),
+    to: String(payload.to || ""),
+    direction: String(payload.direction || "incoming"),
+    callStatus: String(data.event_type || payload.state || ""),
+  };
 }
 
 /**
@@ -53,21 +72,15 @@ function getSipDomain(): string {
  */
 webhookRouter.post("/voice", async (req: Request, res: Response) => {
   try {
-    const {
-      CallSid,
-      From,
-      To,
-      Direction,
-      CallStatus,
-    } = req.body;
+    const { callSid, from, to, direction, callStatus } = extractCallData(req.body);
 
-    console.log(`[Webhook] Incoming call: ${CallSid} from ${From} to ${To}`);
+    console.log(`[Webhook] Incoming call: ${callSid} from ${from} to ${to}`);
 
     // Find the phone number in our database
-    const phoneNumber = await db.getPhoneNumberByNumber(To);
-    
+    const phoneNumber = await db.getPhoneNumberByNumber(to);
+
     if (!phoneNumber) {
-      console.log(`[Webhook] Phone number ${To} not found in database`);
+      console.log(`[Webhook] Phone number ${to} not found in database`);
       res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>This number is not configured. Goodbye.</Say>
@@ -92,45 +105,46 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
         matchedRoute = route;
         break;
       }
-      
+
       if (route.matchType === 'caller_id' && route.matchPattern) {
         const pattern = route.matchPattern.replace(/\*/g, '.*');
-        if (new RegExp(`^${pattern}$`).test(From)) {
+        if (new RegExp(`^${pattern}$`).test(from)) {
           matchedRoute = route;
           break;
         }
       }
-      
+
       if (route.matchType === 'time_based') {
         const daysOfWeek = route.daysOfWeek as number[] | null;
-        const inTimeRange = (!route.timeStart || currentTime >= route.timeStart) && 
+        const inTimeRange = (!route.timeStart || currentTime >= route.timeStart) &&
                           (!route.timeEnd || currentTime <= route.timeEnd);
         const inDayRange = !daysOfWeek || daysOfWeek.includes(currentDay);
-        
+
         if (inTimeRange && inDayRange) {
           matchedRoute = route;
           break;
         }
       }
-      
-      if (route.matchType === 'did' && route.matchPattern === To) {
+
+      if (route.matchType === 'did' && route.matchPattern === to) {
         matchedRoute = route;
         break;
       }
     }
 
-    // Generate LaML based on route destination
-    let laml: string;
-    
+    // Generate TeXML based on route destination
+    let texml: string;
+    const sipDomain = getSipDomain();
+
     if (!matchedRoute) {
       // Default: try to route to assigned endpoint or ring group
       if (phoneNumber.assignedToEndpointId) {
         const endpoint = await db.getSipEndpointById(phoneNumber.assignedToEndpointId);
         if (endpoint) {
-          const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
-          laml = generateLamlDial(sipAddress, { timeout: 30 });
+          const sipAddress = `sip:${endpoint.username}@${sipDomain}`;
+          texml = generateTeXmlDial(sipAddress, { timeout: 30 });
         } else {
-          laml = generateLamlVoicemail();
+          texml = generateTeXmlVoicemail();
         }
       } else if (phoneNumber.assignedToRingGroupId) {
         const ringGroup = await db.getRingGroupById(phoneNumber.assignedToRingGroupId);
@@ -139,21 +153,21 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
           const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
           const sipAddresses = endpoints
             .filter(e => e && e.status === 'active')
-            .map(e => `sip:${e!.username}@${getSipDomain()}`);
-          
+            .map(e => `sip:${e!.username}@${sipDomain}`);
+
           if (sipAddresses.length > 0) {
-            laml = generateLamlRingGroup(sipAddresses, {
+            texml = generateTeXmlRingGroup(sipAddresses, {
               strategy: ringGroup.strategy as 'simultaneous' | 'sequential',
               timeout: ringGroup.ringTimeout || 30,
             });
           } else {
-            laml = generateLamlVoicemail();
+            texml = generateTeXmlVoicemail();
           }
         } else {
-          laml = generateLamlVoicemail();
+          texml = generateTeXmlVoicemail();
         }
       } else {
-        laml = generateLamlVoicemail();
+        texml = generateTeXmlVoicemail();
       }
     } else {
       // Route based on destination type
@@ -162,16 +176,16 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
           if (matchedRoute.destinationId) {
             const endpoint = await db.getSipEndpointById(matchedRoute.destinationId);
             if (endpoint) {
-              const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
-              laml = generateLamlDial(sipAddress, { timeout: 30 });
+              const sipAddress = `sip:${endpoint.username}@${sipDomain}`;
+              texml = generateTeXmlDial(sipAddress, { timeout: 30 });
             } else {
-              laml = generateLamlVoicemail();
+              texml = generateTeXmlVoicemail();
             }
           } else {
-            laml = generateLamlVoicemail();
+            texml = generateTeXmlVoicemail();
           }
           break;
-          
+
         case 'ring_group':
           if (matchedRoute.destinationId) {
             const ringGroup = await db.getRingGroupById(matchedRoute.destinationId);
@@ -180,61 +194,61 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
               const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
               const sipAddresses = endpoints
                 .filter(e => e && e.status === 'active')
-                .map(e => `sip:${e!.username}@${getSipDomain()}`);
-              
+                .map(e => `sip:${e!.username}@${sipDomain}`);
+
               if (sipAddresses.length > 0) {
-                laml = generateLamlRingGroup(sipAddresses, {
+                texml = generateTeXmlRingGroup(sipAddresses, {
                   strategy: ringGroup.strategy as 'simultaneous' | 'sequential',
                   timeout: ringGroup.ringTimeout || 30,
                 });
               } else {
-                laml = generateLamlVoicemail();
+                texml = generateTeXmlVoicemail();
               }
             } else {
-              laml = generateLamlVoicemail();
+              texml = generateTeXmlVoicemail();
             }
           } else {
-            laml = generateLamlVoicemail();
+            texml = generateTeXmlVoicemail();
           }
           break;
-          
+
         case 'external':
           if (matchedRoute.destinationExternal) {
-            laml = `<?xml version="1.0" encoding="UTF-8"?>
+            texml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial timeout="30">
     <Number>${matchedRoute.destinationExternal}</Number>
   </Dial>
 </Response>`;
           } else {
-            laml = generateLamlVoicemail();
+            texml = generateTeXmlVoicemail();
           }
           break;
-          
+
         case 'voicemail':
-          laml = generateLamlVoicemail();
+          texml = generateTeXmlVoicemail();
           break;
-          
+
         case 'ai_agent':
           // AI-powered IVR with speech recognition
           const webhookBaseUrl = `${req.protocol}://${req.get('host')}`;
-          laml = aiIvr.generateAiIvrLaml({
+          texml = aiIvr.generateAiIvrTeXml({
             customerId: phoneNumber.customerId,
             greeting: "Hello, thank you for calling. How may I direct your call? You can say things like 'sales', 'support', or the name of the person you're trying to reach.",
             gatherTimeout: 5,
             webhookUrl: webhookBaseUrl,
           });
           break;
-          
+
         default:
-          laml = generateLamlVoicemail();
+          texml = generateTeXmlVoicemail();
       }
     }
 
     // Log the call
-    console.log(`[Webhook] Responding with LaML for call ${CallSid}`);
-    
-    res.type("application/xml").send(laml);
+    console.log(`[Webhook] Responding with TeXML for call ${callSid}`);
+
+    res.type("application/xml").send(texml);
   } catch (error) {
     console.error("[Webhook] Error handling voice webhook:", error);
     res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
@@ -251,27 +265,23 @@ webhookRouter.post("/voice", async (req: Request, res: Response) => {
  */
 webhookRouter.post("/status", async (req: Request, res: Response) => {
   try {
-    const {
-      CallSid,
-      CallStatus,
-      CallDuration,
-      From,
-      To,
-      Direction,
-    } = req.body;
+    const { callSid, from, to, direction, callStatus } = extractCallData(req.body);
+    const callDuration = req.body.CallDuration || req.body.Duration || "0";
 
-    console.log(`[Webhook] Call status update: ${CallSid} - ${CallStatus}`);
+    console.log(`[Webhook] Call status update: ${callSid} - ${callStatus}`);
 
+    // Normalize direction
+    const normalizedDirection = direction === 'incoming' ? 'inbound' : direction;
     // Find the customer by phone number
-    const phoneNumber = await db.getPhoneNumberByNumber(Direction === 'inbound' ? To : From);
-    
-    if (phoneNumber && CallStatus === 'completed') {
+    const phoneNumber = await db.getPhoneNumberByNumber(normalizedDirection === 'inbound' ? to : from);
+
+    if (phoneNumber && (callStatus === 'completed' || callStatus === 'call.hangup')) {
       // Update usage stats
       await db.incrementUsageStats(phoneNumber.customerId, {
         totalCalls: 1,
-        inboundCalls: Direction === 'inbound' ? 1 : 0,
-        outboundCalls: Direction === 'outbound' ? 1 : 0,
-        totalMinutes: Math.ceil(parseInt(CallDuration || '0') / 60),
+        inboundCalls: normalizedDirection === 'inbound' ? 1 : 0,
+        outboundCalls: normalizedDirection === 'outbound' ? 1 : 0,
+        totalMinutes: Math.ceil(parseInt(String(callDuration) || '0') / 60),
       });
     }
 
@@ -288,37 +298,39 @@ webhookRouter.post("/status", async (req: Request, res: Response) => {
  */
 webhookRouter.post("/recording", async (req: Request, res: Response) => {
   try {
-    const {
-      CallSid,
-      RecordingSid,
-      RecordingUrl,
-      RecordingDuration,
-      From,
-      To,
-      Direction,
-      TranscriptionText,
-    } = req.body;
+    // Support both TeXML and Call Control formats
+    const callSid = req.body.CallSid || req.body.data?.payload?.call_control_id || "";
+    const recordingSid = req.body.RecordingSid || req.body.data?.payload?.recording_id || "";
+    const recordingUrl = req.body.RecordingUrl || req.body.data?.payload?.recording_urls?.mp3 || "";
+    const recordingDuration = req.body.RecordingDuration || req.body.data?.payload?.duration_millis ? String(Math.ceil((req.body.data?.payload?.duration_millis || 0) / 1000)) : "0";
+    const from = req.body.From || req.body.data?.payload?.from || "";
+    const to = req.body.To || req.body.data?.payload?.to || "";
+    const direction = req.body.Direction || req.body.data?.payload?.direction || "inbound";
+    const transcriptionText = req.body.TranscriptionText || "";
 
-    console.log(`[Webhook] Recording ready: ${RecordingSid} for call ${CallSid}`);
+    console.log(`[Webhook] Recording ready: ${recordingSid} for call ${callSid}`);
+
+    // Normalize direction
+    const normalizedDirection = direction === 'incoming' ? 'inbound' : (direction === 'outgoing' ? 'outbound' : direction);
 
     // Find the customer by phone number
-    const phoneNumber = await db.getPhoneNumberByNumber(Direction === 'inbound' ? To : From);
-    
+    const phoneNumber = await db.getPhoneNumberByNumber(normalizedDirection === 'inbound' ? to : from);
+
     if (phoneNumber) {
       // Download recording and upload to S3
-      const recordingKey = `recordings/${phoneNumber.customerId}/${CallSid}-${nanoid(8)}.wav`;
-      
+      const recordingKey = `recordings/${phoneNumber.customerId}/${callSid}-${nanoid(8)}.wav`;
+
       // Store recording metadata
       await db.createCallRecording({
         customerId: phoneNumber.customerId,
-        callSid: CallSid,
-        direction: Direction === 'inbound' ? 'inbound' : 'outbound',
-        fromNumber: From,
-        toNumber: To,
-        duration: parseInt(RecordingDuration || '0'),
-        recordingUrl: RecordingUrl,
+        callSid: callSid,
+        direction: normalizedDirection === 'inbound' ? 'inbound' : 'outbound',
+        fromNumber: from,
+        toNumber: to,
+        duration: parseInt(recordingDuration || '0'),
+        recordingUrl: recordingUrl,
         recordingKey,
-        transcription: TranscriptionText || null,
+        transcription: transcriptionText || null,
         status: 'ready',
         retentionDays: 90,
       });
@@ -328,30 +340,30 @@ webhookRouter.post("/recording", async (req: Request, res: Response) => {
         customerId: phoneNumber.customerId,
         type: 'recording_ready',
         title: 'New Call Recording',
-        message: `A new ${Direction} call recording is available (${Math.ceil(parseInt(RecordingDuration || '0') / 60)} minutes)`,
-        metadata: { callSid: CallSid, recordingSid: RecordingSid },
+        message: `A new ${normalizedDirection} call recording is available (${Math.ceil(parseInt(recordingDuration || '0') / 60)} minutes)`,
+        metadata: { callSid, recordingSid },
       });
 
-      // Send SMS summary if transcription is available and call is long enough
-      const duration = parseInt(RecordingDuration || '0');
+      // Send SMS summary if call is long enough
+      const duration = parseInt(recordingDuration || '0');
       if (duration >= 30) {
         // Process asynchronously to not block the webhook response
         callSummary.sendCallSummarySms({
-          callSid: CallSid,
-          fromNumber: From,
-          toNumber: To,
-          direction: Direction === 'inbound' ? 'inbound' : 'outbound',
+          callSid,
+          fromNumber: from,
+          toNumber: to,
+          direction: normalizedDirection === 'inbound' ? 'inbound' : 'outbound',
           duration,
-          transcription: TranscriptionText || null,
+          transcription: transcriptionText || null,
           customerId: phoneNumber.customerId,
         }).then(result => {
           if (result.success) {
-            console.log(`[Webhook] SMS summary sent for call ${CallSid}: ${result.messageSid}`);
+            console.log(`[Webhook] SMS summary sent for call ${callSid}: ${result.messageId}`);
           } else {
-            console.log(`[Webhook] SMS summary not sent for call ${CallSid}: ${result.error}`);
+            console.log(`[Webhook] SMS summary not sent for call ${callSid}: ${result.error}`);
           }
         }).catch(err => {
-          console.error(`[Webhook] Error sending SMS summary for call ${CallSid}:`, err);
+          console.error(`[Webhook] Error sending SMS summary for call ${callSid}:`, err);
         });
       }
     }
@@ -369,33 +381,31 @@ webhookRouter.post("/recording", async (req: Request, res: Response) => {
  */
 webhookRouter.post("/voicemail", async (req: Request, res: Response) => {
   try {
-    const {
-      CallSid,
-      RecordingSid,
-      RecordingUrl,
-      RecordingDuration,
-      From,
-      To,
-      TranscriptionText,
-    } = req.body;
+    const callSid = req.body.CallSid || "";
+    const recordingSid = req.body.RecordingSid || "";
+    const recordingUrl = req.body.RecordingUrl || "";
+    const recordingDuration = req.body.RecordingDuration || "0";
+    const from = req.body.From || "";
+    const to = req.body.To || "";
+    const transcriptionText = req.body.TranscriptionText || "";
 
-    console.log(`[Webhook] Voicemail received: ${RecordingSid} for call ${CallSid}`);
+    console.log(`[Webhook] Voicemail received: ${recordingSid} for call ${callSid}`);
 
     // Find the customer by phone number
-    const phoneNumber = await db.getPhoneNumberByNumber(To);
-    
+    const phoneNumber = await db.getPhoneNumberByNumber(to);
+
     if (phoneNumber) {
       // Create notification for voicemail
       await db.createNotification({
         customerId: phoneNumber.customerId,
         type: 'voicemail',
         title: 'New Voicemail',
-        message: `You have a new voicemail from ${From} (${Math.ceil(parseInt(RecordingDuration || '0') / 60)} minutes)`,
-        metadata: { 
-          callSid: CallSid, 
-          recordingSid: RecordingSid,
-          from: From,
-          transcription: TranscriptionText,
+        message: `You have a new voicemail from ${from} (${Math.ceil(parseInt(recordingDuration || '0') / 60)} minutes)`,
+        metadata: {
+          callSid,
+          recordingSid,
+          from,
+          transcription: transcriptionText,
         },
       });
     }
@@ -413,25 +423,23 @@ webhookRouter.post("/voicemail", async (req: Request, res: Response) => {
  */
 webhookRouter.post("/missed", async (req: Request, res: Response) => {
   try {
-    const {
-      CallSid,
-      From,
-      To,
-    } = req.body;
+    const callSid = req.body.CallSid || req.body.data?.payload?.call_control_id || "";
+    const from = req.body.From || req.body.data?.payload?.from || "";
+    const to = req.body.To || req.body.data?.payload?.to || "";
 
-    console.log(`[Webhook] Missed call: ${CallSid} from ${From}`);
+    console.log(`[Webhook] Missed call: ${callSid} from ${from}`);
 
     // Find the customer by phone number
-    const phoneNumber = await db.getPhoneNumberByNumber(To);
-    
+    const phoneNumber = await db.getPhoneNumberByNumber(to);
+
     if (phoneNumber) {
       // Create notification for missed call
       await db.createNotification({
         customerId: phoneNumber.customerId,
         type: 'missed_call',
         title: 'Missed Call',
-        message: `You missed a call from ${From}`,
-        metadata: { callSid: CallSid, from: From },
+        message: `You missed a call from ${from}`,
+        metadata: { callSid, from },
       });
     }
 
@@ -462,30 +470,31 @@ webhookRouter.post("/ai-gather", async (req: Request, res: Response) => {
     if (!SpeechResult) {
       // No speech detected, retry
       const webhookBaseUrl = `${req.protocol}://${req.get('host')}`;
-      const laml = aiIvr.generateRetryLaml(
+      const texml = aiIvr.generateRetryTeXml(
         "I didn't catch that. Could you please tell me which department you'd like to reach?",
         webhookBaseUrl,
         customerId,
         attempt
       );
-      res.type("application/xml").send(laml);
+      res.type("application/xml").send(texml);
       return;
     }
 
     // Get available departments for this customer
     const availableDepartments = await aiIvr.getAvailableDepartments(customerId);
-    
+
     // Analyze the speech with LLM
     const intent = await aiIvr.analyzeTransferIntent(SpeechResult, availableDepartments);
-    
+
     console.log(`[AI IVR] Intent analysis:`, intent);
 
     const webhookBaseUrl = `${req.protocol}://${req.get('host')}`;
+    const sipDomain = getSipDomain();
 
     if (intent.shouldTransfer && intent.department) {
       // Try to find matching ring group first
       const ringGroup = await aiIvr.findDepartmentRingGroup(customerId, intent.department);
-      
+
       if (ringGroup) {
         // Get ring group members
         const group = await db.getRingGroupById(ringGroup.ringGroupId);
@@ -494,57 +503,57 @@ webhookRouter.post("/ai-gather", async (req: Request, res: Response) => {
           const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
           const sipAddresses = endpoints
             .filter(e => e && e.status === 'active')
-            .map(e => `sip:${e!.username}@${getSipDomain()}`);
-          
+            .map(e => `sip:${e!.username}@${sipDomain}`);
+
           if (sipAddresses.length > 0) {
-            const laml = aiIvr.generateTransferToRingGroupLaml(sipAddresses, {
+            const texml = aiIvr.generateTransferToRingGroupTeXml(sipAddresses, {
               strategy: group.strategy as 'simultaneous' | 'sequential',
               timeout: group.ringTimeout || 30,
               announcement: `Transferring you to ${ringGroup.name} now.`,
               fallbackUrl: `${webhookBaseUrl}/api/webhooks/ai-fallback?customerId=${customerId}`,
               callerId: From,
             });
-            res.type("application/xml").send(laml);
+            res.type("application/xml").send(texml);
             return;
           }
         }
       }
-      
+
       // Try to find matching endpoint
       const endpoint = await aiIvr.findDepartmentEndpoint(customerId, intent.department);
-      
+
       if (endpoint) {
-        const sipAddress = `sip:${endpoint.username}@${getSipDomain()}`;
-        const laml = aiIvr.generateTransferToEndpointLaml(sipAddress, {
+        const sipAddress = `sip:${endpoint.username}@${sipDomain}`;
+        const texml = aiIvr.generateTransferToEndpointTeXml(sipAddress, {
           timeout: 30,
           announcement: `Transferring you to ${endpoint.displayName || endpoint.username} now.`,
           fallbackUrl: `${webhookBaseUrl}/api/webhooks/ai-fallback?customerId=${customerId}`,
           callerId: From,
         });
-        res.type("application/xml").send(laml);
+        res.type("application/xml").send(texml);
         return;
       }
-      
+
       // Department mentioned but no match found
-      const laml = aiIvr.generateRetryLaml(
+      const texml = aiIvr.generateRetryTeXml(
         `I couldn't find ${intent.department}. Our available departments are: ${availableDepartments.join(', ')}. Which would you like?`,
         webhookBaseUrl,
         customerId,
         attempt
       );
-      res.type("application/xml").send(laml);
+      res.type("application/xml").send(texml);
       return;
     }
 
     // No clear transfer intent, ask for clarification
-    const laml = aiIvr.generateRetryLaml(
+    const texml = aiIvr.generateRetryTeXml(
       intent.response,
       webhookBaseUrl,
       customerId,
       attempt
     );
-    res.type("application/xml").send(laml);
-    
+    res.type("application/xml").send(texml);
+
   } catch (error) {
     console.error("[AI IVR] Error processing speech:", error);
     res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
@@ -562,15 +571,17 @@ webhookRouter.post("/ai-gather", async (req: Request, res: Response) => {
 webhookRouter.post("/ai-fallback", async (req: Request, res: Response) => {
   try {
     const customerId = parseInt(req.query.customerId as string);
-    const { From } = req.body;
+    const from = req.body.From || "";
 
     console.log(`[AI IVR] Fallback triggered for customer ${customerId}`);
 
+    const sipDomain = getSipDomain();
+
     // Try to find a default ring group (reception, main, etc.)
     const ringGroups = await db.getRingGroupsByCustomer(customerId);
-    const defaultGroup = ringGroups.find(g => 
-      g.status === 'active' && 
-      (g.name.toLowerCase().includes('reception') || 
+    const defaultGroup = ringGroups.find(g =>
+      g.status === 'active' &&
+      (g.name.toLowerCase().includes('reception') ||
        g.name.toLowerCase().includes('main') ||
        g.name.toLowerCase().includes('default'))
     ) || ringGroups.find(g => g.status === 'active');
@@ -580,16 +591,16 @@ webhookRouter.post("/ai-fallback", async (req: Request, res: Response) => {
       const endpoints = await Promise.all(memberIds.map(id => db.getSipEndpointById(id)));
       const sipAddresses = endpoints
         .filter(e => e && e.status === 'active')
-        .map(e => `sip:${e!.username}@${getSipDomain()}`);
-      
+        .map(e => `sip:${e!.username}@${sipDomain}`);
+
       if (sipAddresses.length > 0) {
-        const laml = aiIvr.generateTransferToRingGroupLaml(sipAddresses, {
+        const texml = aiIvr.generateTransferToRingGroupTeXml(sipAddresses, {
           strategy: defaultGroup.strategy as 'simultaneous' | 'sequential',
           timeout: defaultGroup.ringTimeout || 30,
           announcement: "Please hold while I connect you.",
-          callerId: From,
+          callerId: from,
         });
-        res.type("application/xml").send(laml);
+        res.type("application/xml").send(texml);
         return;
       }
     }
@@ -597,195 +608,25 @@ webhookRouter.post("/ai-fallback", async (req: Request, res: Response) => {
     // No ring groups, try first active endpoint
     const endpoints = await db.getSipEndpointsByCustomer(customerId);
     const activeEndpoint = endpoints.find(e => e.status === 'active');
-    
+
     if (activeEndpoint) {
-      const sipAddress = `sip:${activeEndpoint.username}@${getSipDomain()}`;
-      const laml = aiIvr.generateTransferToEndpointLaml(sipAddress, {
+      const sipAddress = `sip:${activeEndpoint.username}@${sipDomain}`;
+      const texml = aiIvr.generateTransferToEndpointTeXml(sipAddress, {
         timeout: 30,
         announcement: "Please hold while I connect you.",
-        callerId: From,
+        callerId: from,
       });
-      res.type("application/xml").send(laml);
+      res.type("application/xml").send(texml);
       return;
     }
 
     // Nothing available, go to voicemail
-    res.type("application/xml").send(generateLamlVoicemail());
-    
+    res.type("application/xml").send(generateTeXmlVoicemail());
+
   } catch (error) {
     console.error("[AI IVR] Error in fallback:", error);
-    res.type("application/xml").send(generateLamlVoicemail());
+    res.type("application/xml").send(generateTeXmlVoicemail());
   }
-});
-
-/**
- * SWAIG Transfer Function Webhook - handles AI Agent transfer requests
- * This endpoint is called by SignalWire AI Agent when it needs to transfer a call
- * POST /api/webhooks/swaig-transfer
- */
-webhookRouter.post("/swaig-transfer", async (req: Request, res: Response) => {
-  try {
-    // SignalWire SWAIG sends JSON with the function arguments
-    const {
-      argument,
-      meta_data,
-      call_id,
-      ai_session_id,
-    } = req.body;
-
-    // Parse the argument - SignalWire sends it in different formats
-    // Format 1: { parsed: [{ destination: "Sales" }], raw: "..." }
-    // Format 2: { destination: "sales" }
-    // Format 3: string "{ destination: 'sales' }"
-    let destination = '';
-    if (typeof argument === 'string') {
-      try {
-        const parsed = JSON.parse(argument);
-        destination = parsed?.destination?.toLowerCase() || '';
-      } catch {
-        destination = argument.toLowerCase();
-      }
-    } else if (argument?.parsed && Array.isArray(argument.parsed)) {
-      // SignalWire's actual format: { parsed: [{ destination: "Sales" }] }
-      destination = argument.parsed[0]?.destination?.toLowerCase() || '';
-    } else if (argument?.destination) {
-      destination = argument.destination.toLowerCase();
-    }
-    
-    console.log(`[SWAIG Transfer] Request for destination: "${destination}"`);
-    console.log(`[SWAIG Transfer] Call ID: ${call_id}, Session: ${ai_session_id}`);
-    console.log(`[SWAIG Transfer] Full request body:`, JSON.stringify(req.body, null, 2));
-
-    // Get customer ID from meta_data or query param
-    const customerId = meta_data?.customer_id || parseInt(req.query.customerId as string) || 1;
-    
-    // Define department mappings to DTMF digits
-    // These match the Gather Input in Call Flow Builder:
-    // Press 1 for Sales, 2 for Accounting, 3 for Support
-    const departmentMappings: Record<string, { dtmf: string; name: string }> = {
-      'sales': { dtmf: '1', name: 'Sales' },
-      'accounting': { dtmf: '2', name: 'Accounting' },
-      'support': { dtmf: '3', name: 'Support' },
-      'billing': { dtmf: '2', name: 'Billing' },
-      'technical': { dtmf: '3', name: 'Technical Support' },
-      'customer service': { dtmf: '3', name: 'Customer Service' },
-    };
-
-    // Try to match the destination to a department
-    let matchedDepartment: { dtmf: string; name: string } | null = null;
-    
-    // First try exact match
-    if (departmentMappings[destination]) {
-      matchedDepartment = departmentMappings[destination];
-    } else {
-      // Try partial match
-      for (const [key, value] of Object.entries(departmentMappings)) {
-        if (destination.includes(key) || key.includes(destination)) {
-          matchedDepartment = value;
-          break;
-        }
-      }
-    }
-
-    if (matchedDepartment) {
-      // CORRECT SIP domain from SignalWire dashboard
-      const sipDomain = 'knoxlandin-526db06c4f67.sip.signalwire.com';
-      const sipEndpoints: Record<string, string> = {
-        '1': `sip:knox_101@${sipDomain}`,
-        '2': `sip:knox_102@${sipDomain}`, 
-        '3': `sip:knox_103@${sipDomain}`,
-      };
-      const sipAddress = sipEndpoints[matchedDepartment.dtmf] || sipEndpoints['1'];
-      
-      console.log(`[SWAIG Transfer] Matched department: ${matchedDepartment.name} -> ${sipAddress}`);
-      
-      // Return SWML with connect action to actually transfer the call
-      // The AI Agent says the response, then SWML executes the transfer
-      const response = {
-        response: `Transferring you to ${matchedDepartment.name} now. Please hold while I connect you.`,
-        action: [
-          { back_to_back_functions: false },
-          {
-            SWML: {
-              sections: {
-                main: [
-                  {
-                    connect: {
-                      from: meta_data?.from || undefined,
-                      headers: {},
-                      to: sipAddress
-                    }
-                  }
-                ]
-              }
-            }
-          },
-          { stop: true }
-        ]
-      };
-      
-      console.log(`[SWAIG Transfer] Sending response:`, JSON.stringify(response, null, 2));
-      res.json(response);
-      return;
-    }
-
-    // No match found - ask for clarification
-    console.log(`[SWAIG Transfer] No match found for: ${destination}`);
-    const availableDepts = Object.keys(departmentMappings).join(', ');
-    res.json({
-      response: `I couldn't find that department. Our available departments are: ${availableDepts}. Which would you like to speak with?`
-    });
-    
-  } catch (error) {
-    console.error("[SWAIG Transfer] Error:", error);
-    const sipDomain = 'knoxlandin-526db06c4f67.sip.signalwire.com';
-    res.json({
-      response: "I'm sorry, I encountered an error. Let me connect you to our main line.",
-      action: [
-        { back_to_back_functions: false },
-        {
-          SWML: {
-            sections: {
-              main: [
-                {
-                  connect: {
-                    to: `sip:knox_101@${sipDomain}`
-                  }
-                }
-              ]
-            }
-          }
-        },
-        { stop: true }
-      ]
-    });
-  }
-});
-
-/**
- * SWAIG Functions List - returns available functions for AI Agent
- * GET /api/webhooks/swaig-functions
- */
-webhookRouter.get("/swaig-functions", async (req: Request, res: Response) => {
-  // Return the list of available SWAIG functions
-  res.json({
-    functions: [
-      {
-        function: "transfer",
-        description: "Transfer the call to a specific department like sales, support, accounting, or billing",
-        parameters: {
-          type: "object",
-          properties: {
-            destination: {
-              type: "string",
-              description: "The department to transfer to (e.g., sales, support, accounting, billing)"
-            }
-          },
-          required: ["destination"]
-        }
-      }
-    ]
-  });
 });
 
 /**
@@ -796,7 +637,7 @@ webhookRouter.post("/ai-transfer-status", async (req: Request, res: Response) =>
   try {
     const customerId = parseInt(req.query.customerId as string);
     const { DialCallStatus, CallSid } = req.body;
-    
+
     console.log(`[AI IVR] Transfer status for ${CallSid}: ${DialCallStatus}`);
 
     if (DialCallStatus === 'no-answer' || DialCallStatus === 'busy' || DialCallStatus === 'failed') {
@@ -813,10 +654,10 @@ webhookRouter.post("/ai-transfer-status", async (req: Request, res: Response) =>
 
     // Transfer completed successfully
     res.status(200).send('OK');
-    
+
   } catch (error) {
     console.error("[AI IVR] Error in transfer status:", error);
-    res.type("application/xml").send(generateLamlVoicemail());
+    res.type("application/xml").send(generateTeXmlVoicemail());
   }
 });
 

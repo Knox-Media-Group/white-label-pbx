@@ -7,7 +7,7 @@ import { z } from "zod";
 import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
-import * as signalwire from "./signalwire";
+import * as telnyx from "./telnyx";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 
@@ -186,9 +186,9 @@ export const appRouter = router({
         phone: z.string().optional(),
         status: z.enum(['active', 'suspended', 'pending', 'cancelled']).optional(),
         notes: z.string().optional(),
-        signalwireSubprojectSid: z.string().optional(),
-        signalwireApiToken: z.string().optional(),
-        signalwireSpaceUrl: z.string().optional(),
+        telnyxConnectionId: z.string().optional(),
+        telnyxApiKey: z.string().optional(),
+        telnyxMessagingProfileId: z.string().optional(),
         // SMS Summary settings
         smsSummaryEnabled: z.boolean().optional(),
         notificationPhone: z.string().optional(),
@@ -250,7 +250,7 @@ export const appRouter = router({
         callerId: z.string().optional(),
         displayName: z.string().optional(),
         extensionNumber: z.string().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'video_room']).optional(),
+        callHandler: z.enum(['texml_webhooks', 'call_control', 'ai_agent', 'video_room']).optional(),
         callRequestUrl: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -264,7 +264,7 @@ export const appRouter = router({
           callerId: input.callerId || null,
           displayName: input.displayName || null,
           extensionNumber: input.extensionNumber || null,
-          callHandler: input.callHandler || 'laml_webhooks',
+          callHandler: input.callHandler || 'texml_webhooks',
           callRequestUrl: input.callRequestUrl || null,
           status: 'provisioning',
         });
@@ -280,9 +280,9 @@ export const appRouter = router({
         displayName: z.string().optional(),
         extensionNumber: z.string().optional(),
         status: z.enum(['active', 'inactive', 'provisioning']).optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'video_room']).optional(),
+        callHandler: z.enum(['texml_webhooks', 'call_control', 'ai_agent', 'video_room']).optional(),
         callRequestUrl: z.string().optional(),
-        signalwireEndpointId: z.string().optional(),
+        telnyxCredentialId: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const { id, ...data } = input;
@@ -324,7 +324,7 @@ export const appRouter = router({
         smsEnabled: z.boolean().optional(),
         assignedToEndpointId: z.number().optional(),
         assignedToRingGroupId: z.number().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
+        callHandler: z.enum(['texml_webhooks', 'call_control', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
@@ -338,7 +338,7 @@ export const appRouter = router({
           smsEnabled: input.smsEnabled ?? false,
           assignedToEndpointId: input.assignedToEndpointId || null,
           assignedToRingGroupId: input.assignedToRingGroupId || null,
-          callHandler: input.callHandler || 'laml_webhooks',
+          callHandler: input.callHandler || 'texml_webhooks',
           status: 'active',
         });
         return { id };
@@ -352,7 +352,7 @@ export const appRouter = router({
         smsEnabled: z.boolean().optional(),
         assignedToEndpointId: z.number().nullable().optional(),
         assignedToRingGroupId: z.number().nullable().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
+        callHandler: z.enum(['texml_webhooks', 'call_control', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
         status: z.enum(['active', 'inactive', 'porting']).optional(),
       }))
       .mutation(async ({ input }) => {
@@ -663,75 +663,70 @@ export const appRouter = router({
       }),
   }),
 
-  // ============ SIGNALWIRE API ============
-  signalwireApi: router({
-    // Check if SignalWire is configured
+  // ============ TELNYX API ============
+  telnyxApi: router({
+    // Check if Telnyx is configured
     status: adminProcedure.query(async () => {
-      return signalwire.getCredentialsSummary();
+      return telnyx.getCredentialsSummary();
     }),
-    
+
     // Get account info
     accountInfo: adminProcedure.query(async () => {
-      return signalwire.getAccountInfo();
+      return telnyx.getAccountInfo();
     }),
-    
-    // List SIP endpoints from SignalWire
+
+    // List SIP credentials from Telnyx
     listSipEndpoints: adminProcedure.query(async () => {
-      return signalwire.listSipEndpoints();
+      return telnyx.listSipCredentials();
     }),
-    
-    // Create SIP endpoint in SignalWire
+
+    // Create SIP credential in Telnyx
     createSipEndpoint: adminProcedure
       .input(z.object({
         username: z.string().min(1),
         password: z.string().min(8),
-        callerId: z.string().optional(),
-        callerIdName: z.string().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
-        callRequestUrl: z.string().optional(),
+        name: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        return signalwire.createSipEndpoint(input);
+        return telnyx.createSipCredential(input);
       }),
-    
-    // Update SIP endpoint in SignalWire
+
+    // Update SIP credential in Telnyx
     updateSipEndpoint: adminProcedure
       .input(z.object({
         id: z.string(),
-        callerId: z.string().optional(),
-        callerIdName: z.string().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
-        callRequestUrl: z.string().optional(),
+        name: z.string().optional(),
+        sip_password: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const { id, ...params } = input;
-        return signalwire.updateSipEndpoint(id, params);
+        return telnyx.updateSipCredential(id, params);
       }),
-    
-    // Delete SIP endpoint from SignalWire
+
+    // Delete SIP credential from Telnyx
     deleteSipEndpoint: adminProcedure
       .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
-        return signalwire.deleteSipEndpoint(input.id);
+        return telnyx.deleteSipCredential(input.id);
       }),
-    
+
     // Search available phone numbers
     searchPhoneNumbers: adminProcedure
       .input(z.object({
         areaCode: z.string().optional(),
         contains: z.string().optional(),
-        inRegion: z.string().optional(),
+        state: z.string().optional(),
         type: z.enum(['local', 'toll_free']).optional(),
       }))
       .query(async ({ input }) => {
-        return signalwire.searchAvailablePhoneNumbers(input);
+        return telnyx.searchAvailablePhoneNumbers(input);
       }),
-    
+
     // List owned phone numbers
     listPhoneNumbers: adminProcedure.query(async () => {
-      return signalwire.listPhoneNumbers();
+      return telnyx.listPhoneNumbers();
     }),
-    
+
     // Purchase a phone number
     purchasePhoneNumber: adminProcedure
       .input(z.object({
@@ -739,29 +734,28 @@ export const appRouter = router({
         friendlyName: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        return signalwire.purchasePhoneNumber(input.phoneNumber, input.friendlyName);
+        return telnyx.purchasePhoneNumber(input.phoneNumber, input.friendlyName);
       }),
-    
+
     // Update phone number configuration
     updatePhoneNumber: adminProcedure
       .input(z.object({
-        sid: z.string(),
-        friendlyName: z.string().optional(),
-        voiceUrl: z.string().optional(),
-        voiceMethod: z.string().optional(),
+        id: z.string(),
+        connectionId: z.string().optional(),
+        tags: z.array(z.string()).optional(),
       }))
       .mutation(async ({ input }) => {
-        const { sid, ...params } = input;
-        return signalwire.updatePhoneNumber(sid, params);
+        const { id, ...params } = input;
+        return telnyx.updatePhoneNumber(id, params);
       }),
-    
+
     // Release a phone number
     releasePhoneNumber: adminProcedure
-      .input(z.object({ sid: z.string() }))
+      .input(z.object({ id: z.string() }))
       .mutation(async ({ input }) => {
-        return signalwire.releasePhoneNumber(input.sid);
+        return telnyx.releasePhoneNumber(input.id);
       }),
-    
+
     // List calls
     listCalls: adminProcedure
       .input(z.object({
@@ -770,14 +764,14 @@ export const appRouter = router({
         status: z.string().optional(),
       }).optional())
       .query(async ({ input }) => {
-        return signalwire.listCalls(input);
+        return telnyx.listCalls(input);
       }),
-    
-    // List recordings from SignalWire
+
+    // List recordings from Telnyx
     listRecordings: adminProcedure
-      .input(z.object({ callSid: z.string().optional() }).optional())
+      .input(z.object({ callControlId: z.string().optional() }).optional())
       .query(async ({ input }) => {
-        return signalwire.listRecordings(input?.callSid);
+        return telnyx.listRecordings(input?.callControlId);
       }),
   }),
 
@@ -803,18 +797,18 @@ export const appRouter = router({
           throw new TRPCError({ code: 'FORBIDDEN' });
         }
         
-        // Generate LaML from natural language using LLM
+        // Generate TeXML from natural language using LLM
         const llmResponse = await invokeLLM({
           messages: [
             {
               role: 'system',
-              content: `You are an expert at creating SignalWire LaML (XML) call flows. Convert the user's natural language description into valid LaML XML. Only output the XML, no explanations.
-              
-Available LaML verbs:
+              content: `You are an expert at creating Telnyx TeXML (TwiML-compatible XML) call flows. Convert the user's natural language description into valid TeXML. Only output the XML, no explanations.
+
+Available TeXML verbs:
 - <Say>: Text-to-speech
 - <Play>: Play audio file
 - <Dial>: Connect to phone number or SIP endpoint
-- <Gather>: Collect DTMF input
+- <Gather>: Collect DTMF or speech input
 - <Record>: Record audio
 - <Hangup>: End the call
 - <Redirect>: Redirect to another URL
@@ -833,20 +827,20 @@ Example output:
             }
           ]
         });
-        
+
         const createContent = llmResponse.choices[0]?.message?.content;
-        const generatedLaml = typeof createContent === 'string' ? createContent : '';
-        
+        const generatedTeXml = typeof createContent === 'string' ? createContent : '';
+
         const id = await db.createLlmCallFlow({
           customerId: input.customerId,
           name: input.name,
           naturalLanguageConfig: input.naturalLanguageConfig,
-          generatedLaml,
+          generatedLaml: generatedTeXml,
           isActive: false,
           lastGeneratedAt: new Date(),
         });
-        
-        return { id, generatedLaml };
+
+        return { id, generatedTeXml };
       }),
     
     regenerate: customerProcedure
@@ -859,7 +853,7 @@ Example output:
           messages: [
             {
               role: 'system',
-              content: `You are an expert at creating SignalWire LaML (XML) call flows. Convert the user's natural language description into valid LaML XML. Only output the XML, no explanations.`
+              content: `You are an expert at creating Telnyx TeXML (TwiML-compatible XML) call flows. Convert the user's natural language description into valid TeXML. Only output the XML, no explanations.`
             },
             {
               role: 'user',
@@ -867,17 +861,17 @@ Example output:
             }
           ]
         });
-        
+
         const regenContent = llmResponse.choices[0]?.message?.content;
-        const generatedLaml = typeof regenContent === 'string' ? regenContent : '';
-        
+        const generatedTeXml = typeof regenContent === 'string' ? regenContent : '';
+
         await db.updateLlmCallFlow(input.id, {
           naturalLanguageConfig: input.naturalLanguageConfig,
-          generatedLaml,
+          generatedLaml: generatedTeXml,
           lastGeneratedAt: new Date(),
         });
-        
-        return { generatedLaml };
+
+        return { generatedTeXml };
       }),
     
     activate: customerProcedure

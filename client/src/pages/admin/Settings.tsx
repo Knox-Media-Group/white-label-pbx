@@ -14,34 +14,27 @@ export default function AdminSettings() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Key className="h-5 w-5" />
-              SignalWire API Configuration
+              Telnyx API Configuration
             </CardTitle>
             <CardDescription>
-              Configure your master SignalWire account credentials for managing subprojects
+              Configure your Telnyx account credentials for managing telephony
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="projectId">Project ID</Label>
+                <Label htmlFor="apiKey">API Key</Label>
                 <Input
-                  id="projectId"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  id="apiKey"
+                  type="password"
+                  placeholder="KEY..."
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="apiToken">API Token</Label>
+                <Label htmlFor="sipConnectionId">SIP Connection ID</Label>
                 <Input
-                  id="apiToken"
-                  type="password"
-                  placeholder="PT..."
-                />
-              </div>
-              <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="spaceUrl">Space URL</Label>
-                <Input
-                  id="spaceUrl"
-                  placeholder="your-space.signalwire.com"
+                  id="sipConnectionId"
+                  placeholder="xxxxxxxxxxxxxxxx"
                 />
               </div>
             </div>
@@ -72,7 +65,7 @@ export default function AdminSettings() {
                   value={typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks` : ''}
                 />
                 <p className="text-sm text-muted-foreground">
-                  This is your webhook endpoint for SignalWire call events
+                  This is your webhook endpoint for Telnyx call events. Configure this URL in your Telnyx TeXML Application settings.
                 </p>
               </div>
             </div>

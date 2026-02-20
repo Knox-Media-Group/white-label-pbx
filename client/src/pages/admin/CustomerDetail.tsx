@@ -28,9 +28,9 @@ export default function AdminCustomerDetail() {
     email: "",
     phone: "",
     status: "pending" as "active" | "suspended" | "pending" | "cancelled",
-    signalwireSubprojectSid: "",
-    signalwireApiToken: "",
-    signalwireSpaceUrl: "",
+    telnyxConnectionId: "",
+    telnyxApiKey: "",
+    telnyxMessagingProfileId: "",
     brandingLogo: "",
     brandingPrimaryColor: "#6366f1",
     brandingCompanyName: "",
@@ -44,9 +44,9 @@ export default function AdminCustomerDetail() {
         email: customer.email || "",
         phone: customer.phone || "",
         status: customer.status,
-        signalwireSubprojectSid: customer.signalwireSubprojectSid || "",
-        signalwireApiToken: customer.signalwireApiToken || "",
-        signalwireSpaceUrl: customer.signalwireSpaceUrl || "",
+        telnyxConnectionId: customer.telnyxConnectionId || "",
+        telnyxApiKey: customer.telnyxApiKey || "",
+        telnyxMessagingProfileId: customer.telnyxMessagingProfileId || "",
         brandingLogo: customer.brandingLogo || "",
         brandingPrimaryColor: customer.brandingPrimaryColor || "#6366f1",
         brandingCompanyName: customer.brandingCompanyName || "",
@@ -153,7 +153,7 @@ export default function AdminCustomerDetail() {
         <Tabs defaultValue="general" className="space-y-4">
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="signalwire">SignalWire</TabsTrigger>
+            <TabsTrigger value="telnyx">Telnyx</TabsTrigger>
             <TabsTrigger value="branding">Branding</TabsTrigger>
           </TabsList>
 
@@ -226,40 +226,40 @@ export default function AdminCustomerDetail() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="signalwire">
+          <TabsContent value="telnyx">
             <Card>
               <CardHeader>
-                <CardTitle>SignalWire Integration</CardTitle>
-                <CardDescription>Configure the SignalWire subproject for this customer</CardDescription>
+                <CardTitle>Telnyx Integration</CardTitle>
+                <CardDescription>Configure the Telnyx connection for this customer</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4">
                   <div className="grid gap-2">
-                    <Label htmlFor="subprojectSid">Subproject SID</Label>
+                    <Label htmlFor="connectionId">Connection ID</Label>
                     <Input
-                      id="subprojectSid"
-                      value={formData.signalwireSubprojectSid}
-                      onChange={(e) => setFormData({ ...formData, signalwireSubprojectSid: e.target.value })}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                      id="connectionId"
+                      value={formData.telnyxConnectionId}
+                      onChange={(e) => setFormData({ ...formData, telnyxConnectionId: e.target.value })}
+                      placeholder="xxxxxxxxxxxxxxxx"
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="apiToken">API Token</Label>
+                    <Label htmlFor="apiKey">API Key</Label>
                     <Input
-                      id="apiToken"
+                      id="apiKey"
                       type="password"
-                      value={formData.signalwireApiToken}
-                      onChange={(e) => setFormData({ ...formData, signalwireApiToken: e.target.value })}
-                      placeholder="PT..."
+                      value={formData.telnyxApiKey}
+                      onChange={(e) => setFormData({ ...formData, telnyxApiKey: e.target.value })}
+                      placeholder="KEY..."
                     />
                   </div>
                   <div className="grid gap-2">
-                    <Label htmlFor="spaceUrl">Space URL</Label>
+                    <Label htmlFor="messagingProfileId">Messaging Profile ID</Label>
                     <Input
-                      id="spaceUrl"
-                      value={formData.signalwireSpaceUrl}
-                      onChange={(e) => setFormData({ ...formData, signalwireSpaceUrl: e.target.value })}
-                      placeholder="example.signalwire.com"
+                      id="messagingProfileId"
+                      value={formData.telnyxMessagingProfileId}
+                      onChange={(e) => setFormData({ ...formData, telnyxMessagingProfileId: e.target.value })}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                     />
                   </div>
                 </div>

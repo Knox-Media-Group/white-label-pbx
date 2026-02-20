@@ -1,6 +1,6 @@
 /**
  * AI-Powered IVR Handler
- * Uses SignalWire's speech recognition and LLM for intelligent call routing
+ * Uses Telnyx TeXML speech recognition and LLM for intelligent call routing
  */
 
 import { invokeLLM } from "./_core/llm";
@@ -37,12 +37,12 @@ export async function analyzeTransferIntent(
   availableDepartments: string[]
 ): Promise<TransferIntent> {
   const departmentList = availableDepartments.join(", ");
-  
+
   const response = await invokeLLM({
     messages: [
       {
         role: "system",
-        content: `You are an AI assistant analyzing caller requests for a phone system. 
+        content: `You are an AI assistant analyzing caller requests for a phone system.
 Your job is to determine if the caller wants to be transferred to a specific department.
 
 Available departments: ${departmentList}
@@ -107,21 +107,21 @@ export async function findDepartmentRingGroup(
   departmentName: string
 ): Promise<{ ringGroupId: number; name: string } | null> {
   const ringGroups = await db.getRingGroupsByCustomer(customerId);
-  
+
   // Normalize the department name
   const normalizedDept = departmentName.toLowerCase().trim();
-  
+
   // First, try exact match
   for (const group of ringGroups) {
     if (group.name.toLowerCase() === normalizedDept) {
       return { ringGroupId: group.id, name: group.name };
     }
   }
-  
+
   // Then try alias matching
   for (const group of ringGroups) {
     const groupNameLower = group.name.toLowerCase();
-    
+
     // Check if any alias matches
     for (const [dept, aliases] of Object.entries(DEPARTMENT_ALIASES)) {
       if (aliases.some(alias => groupNameLower.includes(alias) || alias.includes(groupNameLower))) {
@@ -131,15 +131,15 @@ export async function findDepartmentRingGroup(
       }
     }
   }
-  
+
   // Try partial match
   for (const group of ringGroups) {
-    if (group.name.toLowerCase().includes(normalizedDept) || 
+    if (group.name.toLowerCase().includes(normalizedDept) ||
         normalizedDept.includes(group.name.toLowerCase())) {
       return { ringGroupId: group.id, name: group.name };
     }
   }
-  
+
   return null;
 }
 
@@ -151,32 +151,32 @@ export async function findDepartmentEndpoint(
   departmentName: string
 ): Promise<{ endpointId: number; username: string; displayName: string | null } | null> {
   const endpoints = await db.getSipEndpointsByCustomer(customerId);
-  
+
   const normalizedDept = departmentName.toLowerCase().trim();
-  
+
   // Try to match by display name or username
   for (const endpoint of endpoints) {
     const displayName = (endpoint.displayName || "").toLowerCase();
     const username = endpoint.username.toLowerCase();
-    
-    if (displayName.includes(normalizedDept) || 
+
+    if (displayName.includes(normalizedDept) ||
         normalizedDept.includes(displayName) ||
         username.includes(normalizedDept)) {
-      return { 
-        endpointId: endpoint.id, 
+      return {
+        endpointId: endpoint.id,
         username: endpoint.username,
-        displayName: endpoint.displayName 
+        displayName: endpoint.displayName
       };
     }
   }
-  
+
   return null;
 }
 
 /**
- * Generate LaML for AI-powered IVR with speech recognition
+ * Generate TeXML for AI-powered IVR with speech recognition
  */
-export function generateAiIvrLaml(options: {
+export function generateAiIvrTeXml(options: {
   customerId: number;
   greeting?: string;
   gatherTimeout?: number;
@@ -201,9 +201,9 @@ export function generateAiIvrLaml(options: {
 }
 
 /**
- * Generate LaML for transfer to ring group
+ * Generate TeXML for transfer to ring group
  */
-export function generateTransferToRingGroupLaml(
+export function generateTransferToRingGroupTeXml(
   sipAddresses: string[],
   options: {
     strategy: 'simultaneous' | 'sequential';
@@ -214,45 +214,45 @@ export function generateTransferToRingGroupLaml(
   }
 ): string {
   const { strategy, timeout, announcement, fallbackUrl, callerId } = options;
-  
-  let laml = `<?xml version="1.0" encoding="UTF-8"?>
+
+  let texml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>`;
 
   if (announcement) {
-    laml += `
+    texml += `
   <Say>${announcement}</Say>`;
   }
 
   if (strategy === 'simultaneous') {
-    laml += `
+    texml += `
   <Dial timeout="${timeout}"${callerId ? ` callerId="${callerId}"` : ''}${fallbackUrl ? ` action="${fallbackUrl}"` : ''}>`;
     for (const sip of sipAddresses) {
-      laml += `
+      texml += `
     <Sip>${sip}</Sip>`;
     }
-    laml += `
+    texml += `
   </Dial>`;
   } else {
     // Sequential - dial one at a time
     for (let i = 0; i < sipAddresses.length; i++) {
       const isLast = i === sipAddresses.length - 1;
-      laml += `
+      texml += `
   <Dial timeout="${Math.floor(timeout / sipAddresses.length)}"${callerId ? ` callerId="${callerId}"` : ''}${!isLast || fallbackUrl ? ` action="${fallbackUrl || ''}"` : ''}>
     <Sip>${sipAddresses[i]}</Sip>
   </Dial>`;
     }
   }
 
-  laml += `
+  texml += `
 </Response>`;
 
-  return laml;
+  return texml;
 }
 
 /**
- * Generate LaML for transfer to single endpoint
+ * Generate TeXML for transfer to single endpoint
  */
-export function generateTransferToEndpointLaml(
+export function generateTransferToEndpointTeXml(
   sipAddress: string,
   options: {
     timeout?: number;
@@ -262,28 +262,28 @@ export function generateTransferToEndpointLaml(
   }
 ): string {
   const { timeout = 30, announcement, fallbackUrl, callerId } = options;
-  
-  let laml = `<?xml version="1.0" encoding="UTF-8"?>
+
+  let texml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>`;
 
   if (announcement) {
-    laml += `
+    texml += `
   <Say>${announcement}</Say>`;
   }
 
-  laml += `
+  texml += `
   <Dial timeout="${timeout}"${callerId ? ` callerId="${callerId}"` : ''}${fallbackUrl ? ` action="${fallbackUrl}"` : ''}>
     <Sip>${sipAddress}</Sip>
   </Dial>
 </Response>`;
 
-  return laml;
+  return texml;
 }
 
 /**
- * Generate LaML for retry prompt
+ * Generate TeXML for retry prompt
  */
-export function generateRetryLaml(
+export function generateRetryTeXml(
   message: string,
   webhookUrl: string,
   customerId: number,
@@ -313,22 +313,22 @@ export function generateRetryLaml(
 export async function getAvailableDepartments(customerId: number): Promise<string[]> {
   const ringGroups = await db.getRingGroupsByCustomer(customerId);
   const endpoints = await db.getSipEndpointsByCustomer(customerId);
-  
+
   const departments = new Set<string>();
-  
+
   // Add ring group names
   for (const group of ringGroups) {
     if (group.status === 'active') {
       departments.add(group.name);
     }
   }
-  
+
   // Add endpoint display names if they look like departments
   for (const endpoint of endpoints) {
     if (endpoint.status === 'active' && endpoint.displayName) {
       departments.add(endpoint.displayName);
     }
   }
-  
+
   return Array.from(departments);
 }

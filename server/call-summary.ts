@@ -5,7 +5,7 @@
  */
 
 import { invokeLLM } from "./_core/llm";
-import * as signalwire from "./signalwire";
+import * as telnyx from "./telnyx";
 import * as db from "./db";
 
 export interface CallSummaryInput {
@@ -161,7 +161,7 @@ export function formatSummaryForSms(
  */
 export async function sendCallSummarySms(input: CallSummaryInput): Promise<{
   success: boolean;
-  messageSid?: string;
+  messageId?: string;
   error?: string;
 }> {
   try {
@@ -231,8 +231,8 @@ export async function sendCallSummarySms(input: CallSummaryInput): Promise<{
       duration: input.duration,
     });
 
-    // Send the SMS
-    const result = await signalwire.sendSms({
+    // Send the SMS via Telnyx
+    const result = await telnyx.sendSms({
       from: senderNumber,
       to: recipientNumber,
       body: smsText,
@@ -250,7 +250,7 @@ export async function sendCallSummarySms(input: CallSummaryInput): Promise<{
 
     return {
       success: true,
-      messageSid: result.sid,
+      messageId: result.id,
     };
   } catch (error) {
     console.error("[Call Summary] Error sending SMS:", error);
