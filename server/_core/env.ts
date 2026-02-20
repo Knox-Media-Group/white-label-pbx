@@ -10,4 +10,6 @@ export const ENV = {
   // Telnyx
   telnyxApiKey: process.env.TELNYX_API_KEY ?? "",
   telnyxSipConnectionId: process.env.TELNYX_SIP_CONNECTION_ID ?? "",
+  // Retell AI
+  retellApiKey: process.env.RETELL_API_KEY ?? "",
 };

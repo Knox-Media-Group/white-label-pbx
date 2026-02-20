@@ -1,11 +1,12 @@
 /**
- * Telnyx Webhook Handlers
+ * Telnyx & Retell AI Webhook Handlers
  * Handles incoming call events and generates TeXML responses
  */
 
 import { Router, Request, Response } from "express";
 import * as db from "./db";
 import { generateTeXmlDial, generateTeXmlRingGroup, generateTeXmlVoicemail, getSipDomain } from "./telnyx";
+import * as retell from "./retell";
 import * as aiIvr from "./ai-ivr";
 import * as callSummary from "./call-summary";
 import { storagePut } from "./storage";
@@ -658,6 +659,134 @@ webhookRouter.post("/ai-transfer-status", async (req: Request, res: Response) =>
   } catch (error) {
     console.error("[AI IVR] Error in transfer status:", error);
     res.type("application/xml").send(generateTeXmlVoicemail());
+  }
+});
+
+// ============================================================
+// Retell AI Webhooks
+// ============================================================
+
+/**
+ * Retell AI webhook - handles call lifecycle events from Retell
+ * POST /api/webhooks/retell
+ *
+ * Events: call_started, call_ended, call_analyzed
+ */
+webhookRouter.post("/retell", async (req: Request, res: Response) => {
+  try {
+    // Verify webhook signature if API key is available
+    const signature = req.headers["x-retell-signature"] as string;
+    if (signature) {
+      const apiKey = await db.getSystemSetting("retell_api_key") || process.env.RETELL_API_KEY || "";
+      if (apiKey) {
+        const isValid = retell.verifyWebhook(
+          JSON.stringify(req.body),
+          apiKey,
+          signature
+        );
+        if (!isValid) {
+          console.error("[Retell Webhook] Invalid signature");
+          res.status(401).send("Invalid signature");
+          return;
+        }
+      }
+    }
+
+    const { event, call } = req.body;
+
+    console.log(`[Retell Webhook] Event: ${event}, Call ID: ${call?.call_id}`);
+
+    switch (event) {
+      case "call_started": {
+        console.log(`[Retell Webhook] Call started: ${call.call_id} from ${call.from_number} to ${call.to_number}`);
+        break;
+      }
+
+      case "call_ended": {
+        console.log(`[Retell Webhook] Call ended: ${call.call_id}, duration: ${call.end_timestamp - call.start_timestamp}ms`);
+
+        // Find customer by phone number
+        const toNum = call.direction === "inbound" ? call.to_number : call.from_number;
+        const phoneNumber = await db.getPhoneNumberByNumber(toNum);
+
+        if (phoneNumber) {
+          const durationMs = (call.end_timestamp || 0) - (call.start_timestamp || 0);
+          const durationSec = Math.ceil(durationMs / 1000);
+
+          // Update usage stats
+          await db.incrementUsageStats(phoneNumber.customerId, {
+            totalCalls: 1,
+            inboundCalls: call.direction === "inbound" ? 1 : 0,
+            outboundCalls: call.direction === "outbound" ? 1 : 0,
+            totalMinutes: Math.ceil(durationSec / 60),
+          });
+
+          // Create notification for missed/short calls
+          if (call.disconnection_reason === "no_answer" || call.disconnection_reason === "busy") {
+            await db.createNotification({
+              customerId: phoneNumber.customerId,
+              type: "missed_call",
+              title: "Missed AI Call",
+              message: `AI agent couldn't complete call from ${call.from_number}. Reason: ${call.disconnection_reason}`,
+              metadata: { callId: call.call_id, agentId: call.agent_id },
+            });
+          }
+        }
+        break;
+      }
+
+      case "call_analyzed": {
+        console.log(`[Retell Webhook] Call analyzed: ${call.call_id}`);
+
+        const toNumAnalyzed = call.direction === "inbound" ? call.to_number : call.from_number;
+        const phoneNumAnalyzed = await db.getPhoneNumberByNumber(toNumAnalyzed);
+
+        if (phoneNumAnalyzed) {
+          // Extract transcript text
+          const transcriptText = call.transcript || "";
+          const durationMs = (call.end_timestamp || 0) - (call.start_timestamp || 0);
+          const durationSec = Math.ceil(durationMs / 1000);
+
+          // Store as a call recording with transcript
+          await db.createCallRecording({
+            customerId: phoneNumAnalyzed.customerId,
+            callSid: call.call_id,
+            direction: call.direction === "inbound" ? "inbound" : "outbound",
+            fromNumber: call.from_number || "",
+            toNumber: call.to_number || "",
+            duration: durationSec,
+            recordingUrl: call.recording_url || null,
+            transcription: transcriptText || null,
+            summary: call.call_analysis?.call_summary || null,
+            status: "ready",
+            retentionDays: 90,
+          });
+
+          // Create notification
+          await db.createNotification({
+            customerId: phoneNumAnalyzed.customerId,
+            type: "recording_ready",
+            title: "AI Call Completed",
+            message: `AI agent handled ${call.direction} call (${Math.ceil(durationSec / 60)} min). ${call.call_analysis?.call_summary ? "Summary: " + call.call_analysis.call_summary.substring(0, 100) : ""}`,
+            metadata: {
+              callId: call.call_id,
+              agentId: call.agent_id,
+              sentiment: call.call_analysis?.user_sentiment,
+            },
+          });
+        }
+        break;
+      }
+
+      default:
+        console.log(`[Retell Webhook] Unhandled event: ${event}`);
+    }
+
+    // Acknowledge receipt
+    res.status(204).send();
+  } catch (error) {
+    console.error("[Retell Webhook] Error handling webhook:", error);
+    res.status(500).send("Error");
   }
 });
 

@@ -14,7 +14,9 @@ import {
   notificationSettings, InsertNotificationSettings, NotificationSettings,
   llmCallFlows, InsertLlmCallFlow, LlmCallFlow,
   retentionPolicies, InsertRetentionPolicy, RetentionPolicy,
-  localCredentials, InsertLocalCredential, LocalCredential
+  localCredentials, InsertLocalCredential, LocalCredential,
+  systemSettings, InsertSystemSetting, SystemSetting,
+  retellAgents, InsertRetellAgent, RetellAgent,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -529,4 +531,86 @@ export async function deleteLocalCredential(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(localCredentials).where(eq(localCredentials.id, id));
+}
+
+// ============ SYSTEM SETTINGS OPERATIONS ============
+export async function getSystemSetting(key: string): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+  return result[0]?.value ?? null;
+}
+
+export async function getSystemSettings(keys: string[]): Promise<Record<string, string | null>> {
+  const db = await getDb();
+  if (!db) return {};
+  const results: Record<string, string | null> = {};
+  for (const key of keys) {
+    const row = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+    results[key] = row[0]?.value ?? null;
+  }
+  return results;
+}
+
+export async function setSystemSetting(key: string, value: string | null): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+  if (existing.length > 0) {
+    await db.update(systemSettings).set({ value, updatedAt: new Date() }).where(eq(systemSettings.key, key));
+  } else {
+    await db.insert(systemSettings).values({ key, value });
+  }
+}
+
+export async function setSystemSettings(settings: Record<string, string | null>): Promise<void> {
+  for (const [key, value] of Object.entries(settings)) {
+    await setSystemSetting(key, value);
+  }
+}
+
+// ============ RETELL AGENT OPERATIONS ============
+export async function createRetellAgent(agent: InsertRetellAgent): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(retellAgents).values(agent).returning({ id: retellAgents.id });
+  return result[0].id;
+}
+
+export async function getRetellAgentById(id: number): Promise<RetellAgent | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(retellAgents).where(eq(retellAgents.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getRetellAgentByRetellId(retellAgentId: string): Promise<RetellAgent | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(retellAgents).where(eq(retellAgents.retellAgentId, retellAgentId)).limit(1);
+  return result[0];
+}
+
+export async function getRetellAgentsByCustomer(customerId: number): Promise<RetellAgent[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(retellAgents).where(eq(retellAgents.customerId, customerId)).orderBy(desc(retellAgents.createdAt));
+}
+
+export async function getAllRetellAgents(): Promise<RetellAgent[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(retellAgents).orderBy(desc(retellAgents.createdAt));
+}
+
+export async function updateRetellAgent(id: number, data: Partial<InsertRetellAgent>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(retellAgents).set({ ...data, updatedAt: new Date() }).where(eq(retellAgents.id, id));
+}
+
+export async function deleteRetellAgent(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(retellAgents).where(eq(retellAgents.id, id));
 }

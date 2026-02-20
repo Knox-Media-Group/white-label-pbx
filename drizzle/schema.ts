@@ -53,6 +53,8 @@ export const customers = pgTable("customers", {
   telnyxConnectionId: varchar("telnyxConnectionId", { length: 64 }),
   telnyxApiKey: text("telnyxApiKey"),
   telnyxMessagingProfileId: varchar("telnyxMessagingProfileId", { length: 255 }),
+  // Retell AI integration
+  retellApiKey: text("retellApiKey"),
   // Branding settings
   brandingLogo: text("brandingLogo"),
   brandingPrimaryColor: varchar("brandingPrimaryColor", { length: 7 }).default("#6366f1"),
@@ -117,6 +119,7 @@ export const phoneNumbers = pgTable("phoneNumbers", {
   callHandler: phoneCallHandlerEnum("callHandler").default("texml_webhooks"),
   callRequestUrl: text("callRequestUrl"),
   callControlAppId: varchar("callControlAppId", { length: 64 }),
+  retellAgentId: varchar("retellAgentId", { length: 128 }),
   status: phoneStatusEnum("status").default("active").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -311,3 +314,36 @@ export const localCredentials = pgTable("local_credentials", {
 
 export type LocalCredential = typeof localCredentials.$inferSelect;
 export type InsertLocalCredential = typeof localCredentials.$inferInsert;
+
+/**
+ * System Settings - key-value store for platform-wide configuration (API keys, etc.)
+ */
+export const systemSettings = pgTable("systemSettings", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 128 }).notNull().unique(),
+  value: text("value"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type SystemSetting = typeof systemSettings.$inferSelect;
+export type InsertSystemSetting = typeof systemSettings.$inferInsert;
+
+/**
+ * Retell AI Agents - tracks AI voice agents created via Retell
+ */
+export const retellAgents = pgTable("retellAgents", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customerId").notNull(),
+  retellAgentId: varchar("retellAgentId", { length: 128 }).notNull(),
+  agentName: varchar("agentName", { length: 255 }).notNull(),
+  voiceId: varchar("voiceId", { length: 128 }),
+  llmId: varchar("llmId", { length: 128 }),
+  webhookUrl: text("webhookUrl"),
+  status: activeInactiveEnum("status").default("active").notNull(),
+  lastSyncedAt: timestamp("lastSyncedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type RetellAgent = typeof retellAgents.$inferSelect;
+export type InsertRetellAgent = typeof retellAgents.$inferInsert;

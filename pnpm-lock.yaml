@@ -184,6 +184,9 @@ importers:
       recharts:
         specifier: ^2.15.2
         version: 2.15.4(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      retell-sdk:
+        specifier: ^5.2.0
+        version: 5.2.0
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -3874,6 +3877,9 @@ packages:
 
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
+
+  retell-sdk@5.2.0:
+    resolution: {integrity: sha512-M0n6y6FCW06emXCiur1vIVWN9Via4pSxbGuXbQPsHwNyReZh1oFdE0vGO1yoOptRUu84Z/X9Bo2m/1feoOsXxA==}
 
   robust-predicates@3.0.2:
     resolution: {integrity: sha512-IXgzBWvWQwE6PrDI05OvmXUIruQTcoMDzRsOd5CDvHCVLcLHMTSYvOK5Cm46kWqlV3yAbuSpBZdJ5oP5OUoStg==}
@@ -8540,6 +8546,8 @@ snapshots:
       unified: 11.0.5
 
   resolve-pkg-maps@1.0.0: {}
+
+  retell-sdk@5.2.0: {}
 
   robust-predicates@3.0.2: {}
 

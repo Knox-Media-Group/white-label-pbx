@@ -296,7 +296,7 @@ export async function processCallCompletion(input: {
     });
 
     if (result.success) {
-      console.log(`[Call Summary] SMS sent successfully: ${result.messageSid}`);
+      console.log(`[Call Summary] SMS sent successfully: ${result.messageId}`);
     } else {
       console.log(`[Call Summary] SMS not sent: ${result.error}`);
     }

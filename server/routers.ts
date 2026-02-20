@@ -8,6 +8,7 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
 import * as telnyx from "./telnyx";
+import * as retell from "./retell";
 import * as viirtue from "./viirtue";
 import type { ViirtueConfig } from "./viirtue";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
@@ -1145,6 +1146,194 @@ Example output:
         }
 
         return results;
+      }),
+  }),
+
+  // ============ SYSTEM SETTINGS ============
+  settings: router({
+    get: adminProcedure
+      .input(z.object({ keys: z.array(z.string()) }))
+      .query(async ({ input }) => {
+        return db.getSystemSettings(input.keys);
+      }),
+
+    save: adminProcedure
+      .input(z.object({
+        settings: z.record(z.string(), z.string().nullable()),
+      }))
+      .mutation(async ({ input }) => {
+        await db.setSystemSettings(input.settings);
+        return { success: true };
+      }),
+  }),
+
+  // ============ RETELL AI ============
+  retellApi: router({
+    status: adminProcedure.query(async () => {
+      return retell.getConfigSummary();
+    }),
+
+    // List agents from Retell API
+    listRemoteAgents: adminProcedure.query(async () => {
+      const configured = await retell.isConfigured();
+      if (!configured) return [];
+      return retell.listAgents();
+    }),
+
+    // Get single agent from Retell API
+    getRemoteAgent: adminProcedure
+      .input(z.object({ agentId: z.string() }))
+      .query(async ({ input }) => {
+        return retell.getAgent(input.agentId);
+      }),
+
+    // Create agent on Retell API + store locally
+    createAgent: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        agentName: z.string().min(1),
+        voiceId: z.string().optional(),
+        llmId: z.string().optional(),
+        webhookUrl: z.string().optional(),
+        language: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const responseEngine = input.llmId
+          ? { type: "retell-llm" as const, llmId: input.llmId }
+          : undefined;
+
+        const retellAgent = await retell.createAgent({
+          agentName: input.agentName,
+          voiceId: input.voiceId,
+          responseEngine,
+          webhookUrl: input.webhookUrl,
+          language: input.language,
+        });
+
+        // Store locally
+        const localId = await db.createRetellAgent({
+          customerId: input.customerId,
+          retellAgentId: retellAgent.agent_id,
+          agentName: input.agentName,
+          voiceId: input.voiceId || null,
+          llmId: input.llmId || null,
+          webhookUrl: input.webhookUrl || null,
+          status: "active",
+          lastSyncedAt: new Date(),
+        });
+
+        return { id: localId, retellAgentId: retellAgent.agent_id };
+      }),
+
+    // Update agent on Retell API + locally
+    updateAgent: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        agentName: z.string().optional(),
+        voiceId: z.string().optional(),
+        webhookUrl: z.string().optional(),
+        language: z.string().optional(),
+        status: z.enum(["active", "inactive"]).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const localAgent = await db.getRetellAgentById(input.id);
+        if (!localAgent) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Agent not found" });
+        }
+
+        // Update on Retell
+        await retell.updateAgent(localAgent.retellAgentId, {
+          agentName: input.agentName,
+          voiceId: input.voiceId,
+          webhookUrl: input.webhookUrl,
+          language: input.language,
+        });
+
+        // Update locally
+        const { id, ...data } = input;
+        await db.updateRetellAgent(id, data);
+        return { success: true };
+      }),
+
+    // Delete agent from Retell API + locally
+    deleteAgent: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const localAgent = await db.getRetellAgentById(input.id);
+        if (localAgent) {
+          try {
+            await retell.deleteAgent(localAgent.retellAgentId);
+          } catch (err) {
+            console.error("[Retell] Failed to delete remote agent:", err);
+          }
+        }
+        await db.deleteRetellAgent(input.id);
+        return { success: true };
+      }),
+
+    // List local agents (stored in our DB)
+    listAgents: adminProcedure
+      .input(z.object({ customerId: z.number().optional() }).optional())
+      .query(async ({ input }) => {
+        if (input?.customerId) {
+          return db.getRetellAgentsByCustomer(input.customerId);
+        }
+        return db.getAllRetellAgents();
+      }),
+
+    // List phone numbers from Retell
+    listPhoneNumbers: adminProcedure.query(async () => {
+      const configured = await retell.isConfigured();
+      if (!configured) return [];
+      return retell.listPhoneNumbers();
+    }),
+
+    // Import a Telnyx number into Retell
+    importPhoneNumber: adminProcedure
+      .input(z.object({
+        phoneNumber: z.string(),
+        terminationUri: z.string(),
+        inboundAgentId: z.string().optional(),
+        outboundAgentId: z.string().optional(),
+        sipTrunkAuthUsername: z.string().optional(),
+        sipTrunkAuthPassword: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return retell.importPhoneNumber(input);
+      }),
+
+    // Update phone number agent binding in Retell
+    updatePhoneNumber: adminProcedure
+      .input(z.object({
+        phoneNumber: z.string(),
+        inboundAgentId: z.string().nullable().optional(),
+        outboundAgentId: z.string().nullable().optional(),
+        nickname: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { phoneNumber, ...params } = input;
+        return retell.updatePhoneNumber(phoneNumber, params);
+      }),
+
+    // Create an outbound call via Retell
+    createCall: adminProcedure
+      .input(z.object({
+        fromNumber: z.string(),
+        toNumber: z.string(),
+        agentId: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        return retell.createPhoneCall(input);
+      }),
+
+    // List calls from Retell
+    listCalls: adminProcedure
+      .input(z.object({
+        agentId: z.string().optional(),
+        limit: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return retell.listCalls(input);
       }),
   }),
 });

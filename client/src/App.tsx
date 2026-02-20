@@ -14,6 +14,7 @@ import AdminSettings from "./pages/admin/Settings";
 import AdminPhoneNumbers from "./pages/admin/PhoneNumbers";
 import AdminSipEndpoints from "./pages/admin/SipEndpoints";
 import AdminViirtueImport from "./pages/admin/ViirtueImport";
+import AdminRetellAgents from "./pages/admin/RetellAgents";
 
 // Customer Portal Pages
 import CustomerDashboard from "./pages/customer/Dashboard";
@@ -39,6 +40,7 @@ function Router() {
       <Route path="/admin/phone-numbers" component={AdminPhoneNumbers} />
       <Route path="/admin/sip-endpoints" component={AdminSipEndpoints} />
       <Route path="/admin/import" component={AdminViirtueImport} />
+      <Route path="/admin/ai-agents" component={AdminRetellAgents} />
 
       {/* Customer Portal Routes */}
       <Route path="/portal" component={CustomerDashboard} />

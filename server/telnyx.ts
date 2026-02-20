@@ -4,13 +4,25 @@
  */
 
 import axios, { AxiosInstance } from "axios";
+import * as db from "./db";
 
-// Get credentials from environment
+// Get credentials from environment (fallback)
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY || "";
 const TELNYX_SIP_CONNECTION_ID = process.env.TELNYX_SIP_CONNECTION_ID || "";
 
 // Base URL for Telnyx API v2
 const BASE_URL = "https://api.telnyx.com/v2";
+
+// Resolve API key from DB settings first, then env var
+async function getApiKey(): Promise<string> {
+  const dbKey = await db.getSystemSetting("telnyx_api_key");
+  return dbKey || TELNYX_API_KEY;
+}
+
+async function getSipConnectionId(): Promise<string> {
+  const dbVal = await db.getSystemSetting("telnyx_sip_connection_id");
+  return dbVal || TELNYX_SIP_CONNECTION_ID;
+}
 
 // Create axios instance with auth
 const createClient = (): AxiosInstance => {
@@ -18,6 +30,18 @@ const createClient = (): AxiosInstance => {
     baseURL: BASE_URL,
     headers: {
       "Authorization": `Bearer ${TELNYX_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+};
+
+// Create client with dynamically-resolved API key
+const createDynamicClient = async (): Promise<AxiosInstance> => {
+  const apiKey = await getApiKey();
+  return axios.create({
+    baseURL: BASE_URL,
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
   });
@@ -262,11 +286,19 @@ export function isConfigured(): boolean {
   return !!(TELNYX_API_KEY && TELNYX_SIP_CONNECTION_ID);
 }
 
-export function getCredentialsSummary() {
+export async function isConfiguredAsync(): Promise<boolean> {
+  const apiKey = await getApiKey();
+  const connId = await getSipConnectionId();
+  return !!(apiKey && connId);
+}
+
+export async function getCredentialsSummary() {
+  const apiKey = await getApiKey();
+  const connId = await getSipConnectionId();
   return {
-    configured: isConfigured(),
-    apiKey: TELNYX_API_KEY ? `${TELNYX_API_KEY.substring(0, 12)}...` : "Not set",
-    sipConnectionId: TELNYX_SIP_CONNECTION_ID || "Not set",
+    configured: !!(apiKey && connId),
+    apiKey: apiKey ? `${apiKey.substring(0, 12)}...` : "Not set",
+    sipConnectionId: connId || "Not set",
   };
 }
 
