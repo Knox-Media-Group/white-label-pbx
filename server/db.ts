@@ -17,6 +17,7 @@ import {
   localCredentials, InsertLocalCredential, LocalCredential,
   systemSettings, InsertSystemSetting, SystemSetting,
   retellAgents, InsertRetellAgent, RetellAgent,
+  portOrders, InsertPortOrder, PortOrder,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -613,4 +614,43 @@ export async function deleteRetellAgent(id: number): Promise<void> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   await db.delete(retellAgents).where(eq(retellAgents.id, id));
+}
+
+// ============ PORT ORDER OPERATIONS ============
+export async function createPortOrder(order: InsertPortOrder): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(portOrders).values(order).returning({ id: portOrders.id });
+  return result[0].id;
+}
+
+export async function getPortOrderById(id: number): Promise<PortOrder | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(portOrders).where(eq(portOrders.id, id)).limit(1);
+  return result[0];
+}
+
+export async function getPortOrdersByCustomer(customerId: number): Promise<PortOrder[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(portOrders).where(eq(portOrders.customerId, customerId)).orderBy(desc(portOrders.createdAt));
+}
+
+export async function getAllPortOrders(): Promise<PortOrder[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(portOrders).orderBy(desc(portOrders.createdAt));
+}
+
+export async function updatePortOrder(id: number, data: Partial<InsertPortOrder>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(portOrders).set({ ...data, updatedAt: new Date() }).where(eq(portOrders.id, id));
+}
+
+export async function deletePortOrder(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(portOrders).where(eq(portOrders.id, id));
 }

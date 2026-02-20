@@ -280,6 +280,97 @@ export async function deleteRecording(id: string) {
   return response.data;
 }
 
+// ============ Number Porting ============
+
+export interface CheckPortabilityParams {
+  phoneNumbers: string[];
+}
+
+export async function checkPortability(phoneNumbers: string[]) {
+  const client = await createDynamicClient();
+  const response = await client.post("/portability_checks", {
+    phone_numbers: phoneNumbers,
+  });
+  return response.data.data;
+}
+
+export interface CreatePortOrderParams {
+  phoneNumbers: string[];
+  connectionId?: string;
+  // Authorized contact
+  authorizedName: string;
+  // Current carrier info
+  losingCarrierName?: string;
+  accountNumber?: string;
+  accountPin?: string;
+  // Business / subscriber info
+  businessName?: string;
+  // Service address
+  streetAddress?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+}
+
+export async function createPortOrder(params: CreatePortOrderParams) {
+  const client = await createDynamicClient();
+  const connId = await getSipConnectionId();
+
+  const body: Record<string, unknown> = {
+    phone_numbers: params.phoneNumbers.map(pn => ({ phone_number: pn })),
+    connection_id: params.connectionId || connId,
+    port_type: "manual",
+  };
+
+  // Add optional fields
+  if (params.authorizedName) body.authorized_name = params.authorizedName;
+  if (params.businessName) body.business_name = params.businessName;
+  if (params.losingCarrierName) body.losing_carrier_name = params.losingCarrierName;
+  if (params.accountNumber) body.account_number = params.accountNumber;
+  if (params.accountPin) body.account_pin = params.accountPin;
+
+  if (params.streetAddress) {
+    body.old_service_address = {
+      street_address: params.streetAddress,
+      city: params.city,
+      state: params.state,
+      zip: params.zip,
+      country: params.country || "US",
+    };
+  }
+
+  const response = await client.post("/porting_orders", body);
+  return response.data.data;
+}
+
+export async function getPortOrder(portOrderId: string) {
+  const client = await createDynamicClient();
+  const response = await client.get(`/porting_orders/${portOrderId}`);
+  return response.data.data;
+}
+
+export async function listPortOrders(params?: { status?: string; pageSize?: number }) {
+  const client = await createDynamicClient();
+  const queryParams: Record<string, string> = {};
+  if (params?.status) queryParams["filter[status]"] = params.status;
+  if (params?.pageSize) queryParams["page[size]"] = String(params.pageSize);
+  const response = await client.get("/porting_orders", { params: queryParams });
+  return response.data;
+}
+
+export async function cancelPortOrder(portOrderId: string) {
+  const client = await createDynamicClient();
+  const response = await client.post(`/porting_orders/${portOrderId}/actions/cancel`);
+  return response.data.data;
+}
+
+export async function confirmPortOrder(portOrderId: string) {
+  const client = await createDynamicClient();
+  const response = await client.post(`/porting_orders/${portOrderId}/actions/confirm`);
+  return response.data.data;
+}
+
 // ============ Utility Functions ============
 
 export function isConfigured(): boolean {

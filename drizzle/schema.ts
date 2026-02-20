@@ -16,6 +16,7 @@ export const destinationTypeEnum = pgEnum("destination_type", ["endpoint", "ring
 export const callDirectionEnum = pgEnum("call_direction", ["inbound", "outbound"]);
 export const recordingStatusEnum = pgEnum("recording_status", ["processing", "ready", "failed", "deleted"]);
 export const notificationTypeEnum = pgEnum("notification_type", ["missed_call", "voicemail", "high_volume", "system", "recording_ready"]);
+export const portOrderStatusEnum = pgEnum("port_order_status", ["draft", "submitted", "in_process", "exception", "foc_date_confirmed", "ported", "cancelled"]);
 
 // ============ TABLES ============
 
@@ -347,3 +348,39 @@ export const retellAgents = pgTable("retellAgents", {
 
 export type RetellAgent = typeof retellAgents.$inferSelect;
 export type InsertRetellAgent = typeof retellAgents.$inferInsert;
+
+/**
+ * Port Orders - tracks number porting requests to Telnyx
+ */
+export const portOrders = pgTable("portOrders", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customerId").notNull(),
+  telnyxPortOrderId: varchar("telnyxPortOrderId", { length: 128 }),
+  status: portOrderStatusEnum("portOrderStatus").default("draft").notNull(),
+  // Phone numbers being ported (array of E.164 strings)
+  phoneNumberIds: jsonb("phoneNumberIds"), // local phoneNumber IDs included in this port
+  phoneNumbers: jsonb("portPhoneNumbers"), // E.164 phone number strings
+  // Required porting info
+  authorizedName: varchar("authorizedName", { length: 255 }),
+  businessName: varchar("businessName", { length: 255 }),
+  losingCarrier: varchar("losingCarrier", { length: 255 }),
+  accountNumber: varchar("accountNumber", { length: 128 }),
+  accountPin: varchar("accountPin", { length: 64 }),
+  // Service address
+  streetAddress: varchar("streetAddress", { length: 255 }),
+  city: varchar("city", { length: 128 }),
+  state: varchar("state", { length: 64 }),
+  zip: varchar("zip", { length: 16 }),
+  country: varchar("country", { length: 2 }).default("US"),
+  // Dates
+  focDate: timestamp("focDate"),
+  activationDate: timestamp("activationDate"),
+  // Notes and errors
+  notes: text("notes"),
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type PortOrder = typeof portOrders.$inferSelect;
+export type InsertPortOrder = typeof portOrders.$inferInsert;

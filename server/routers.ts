@@ -1149,6 +1149,218 @@ Example output:
       }),
   }),
 
+  // ============ PORT ORDERS ============
+  portOrders: router({
+    // List all port orders (admin sees all, customer sees theirs)
+    list: adminProcedure
+      .input(z.object({ customerId: z.number().optional() }).optional())
+      .query(async ({ input }) => {
+        if (input?.customerId) {
+          return db.getPortOrdersByCustomer(input.customerId);
+        }
+        return db.getAllPortOrders();
+      }),
+
+    getById: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return db.getPortOrderById(input.id);
+      }),
+
+    // Check if numbers are portable
+    checkPortability: adminProcedure
+      .input(z.object({ phoneNumbers: z.array(z.string()).min(1) }))
+      .mutation(async ({ input }) => {
+        return telnyx.checkPortability(input.phoneNumbers);
+      }),
+
+    // Create a new port order (draft)
+    create: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        phoneNumberIds: z.array(z.number()).min(1),
+        authorizedName: z.string().min(1),
+        businessName: z.string().optional(),
+        losingCarrier: z.string().optional(),
+        accountNumber: z.string().optional(),
+        accountPin: z.string().optional(),
+        streetAddress: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        zip: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        // Look up the actual phone number strings from our DB
+        const phoneNumberStrings: string[] = [];
+        for (const pnId of input.phoneNumberIds) {
+          const pn = await db.getPhoneNumberById(pnId);
+          if (pn) phoneNumberStrings.push(pn.phoneNumber);
+        }
+
+        if (phoneNumberStrings.length === 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No valid phone numbers found' });
+        }
+
+        const id = await db.createPortOrder({
+          customerId: input.customerId,
+          status: 'draft',
+          phoneNumberIds: input.phoneNumberIds,
+          phoneNumbers: phoneNumberStrings,
+          authorizedName: input.authorizedName,
+          businessName: input.businessName || null,
+          losingCarrier: input.losingCarrier || null,
+          accountNumber: input.accountNumber || null,
+          accountPin: input.accountPin || null,
+          streetAddress: input.streetAddress || null,
+          city: input.city || null,
+          state: input.state || null,
+          zip: input.zip || null,
+          notes: input.notes || null,
+        });
+
+        return { id, phoneNumbers: phoneNumberStrings };
+      }),
+
+    // Submit a draft port order to Telnyx
+    submit: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Port order not found' });
+        }
+        if (order.status !== 'draft') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `Cannot submit order in "${order.status}" status` });
+        }
+
+        const phoneNums = (order.phoneNumbers as string[]) || [];
+        if (phoneNums.length === 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'No phone numbers in port order' });
+        }
+
+        try {
+          const telnyxOrder = await telnyx.createPortOrder({
+            phoneNumbers: phoneNums,
+            authorizedName: order.authorizedName || '',
+            businessName: order.businessName || undefined,
+            losingCarrierName: order.losingCarrier || undefined,
+            accountNumber: order.accountNumber || undefined,
+            accountPin: order.accountPin || undefined,
+            streetAddress: order.streetAddress || undefined,
+            city: order.city || undefined,
+            state: order.state || undefined,
+            zip: order.zip || undefined,
+          });
+
+          await db.updatePortOrder(input.id, {
+            telnyxPortOrderId: telnyxOrder.id,
+            status: 'submitted',
+          });
+
+          // Update local phone numbers to 'porting' status
+          const phoneNumberIds = (order.phoneNumberIds as number[]) || [];
+          for (const pnId of phoneNumberIds) {
+            await db.updatePhoneNumber(pnId, { status: 'porting' });
+          }
+
+          return { success: true, telnyxPortOrderId: telnyxOrder.id };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Telnyx API error';
+          await db.updatePortOrder(input.id, { lastError: msg });
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Port submission failed: ${msg}` });
+        }
+      }),
+
+    // Sync status from Telnyx
+    syncStatus: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order || !order.telnyxPortOrderId) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Port order not found or not submitted to Telnyx' });
+        }
+
+        try {
+          const telnyxOrder = await telnyx.getPortOrder(order.telnyxPortOrderId);
+
+          // Map Telnyx status to our status
+          let localStatus = order.status;
+          const telnyxStatus = (telnyxOrder.status || '').toLowerCase().replace(/-/g, '_');
+          const validStatuses = ['draft', 'submitted', 'in_process', 'exception', 'foc_date_confirmed', 'ported', 'cancelled'];
+          if (validStatuses.includes(telnyxStatus)) {
+            localStatus = telnyxStatus as typeof localStatus;
+          }
+
+          const updateData: Record<string, unknown> = { status: localStatus };
+          if (telnyxOrder.foc_date) updateData.focDate = new Date(telnyxOrder.foc_date);
+          if (telnyxOrder.activation_date) updateData.activationDate = new Date(telnyxOrder.activation_date);
+
+          await db.updatePortOrder(input.id, updateData);
+
+          // If ported, update local phone numbers to active
+          if (localStatus === 'ported') {
+            const phoneNumberIds = (order.phoneNumberIds as number[]) || [];
+            for (const pnId of phoneNumberIds) {
+              await db.updatePhoneNumber(pnId, { status: 'active' });
+            }
+          }
+
+          return { status: localStatus, focDate: updateData.focDate, activationDate: updateData.activationDate };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Telnyx API error';
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `Status sync failed: ${msg}` });
+        }
+      }),
+
+    // Cancel a port order
+    cancel: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Port order not found' });
+        }
+
+        // Cancel on Telnyx if submitted
+        if (order.telnyxPortOrderId) {
+          try {
+            await telnyx.cancelPortOrder(order.telnyxPortOrderId);
+          } catch (err) {
+            console.error("[Porting] Failed to cancel on Telnyx:", err);
+          }
+        }
+
+        await db.updatePortOrder(input.id, { status: 'cancelled' });
+
+        // Revert phone number statuses
+        const phoneNumberIds = (order.phoneNumberIds as number[]) || [];
+        for (const pnId of phoneNumberIds) {
+          const pn = await db.getPhoneNumberById(pnId);
+          if (pn && pn.status === 'porting') {
+            await db.updatePhoneNumber(pnId, { status: 'inactive' });
+          }
+        }
+
+        return { success: true };
+      }),
+
+    // Delete a draft port order
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order) {
+          throw new TRPCError({ code: 'NOT_FOUND' });
+        }
+        if (order.status !== 'draft' && order.status !== 'cancelled') {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Can only delete draft or cancelled orders' });
+        }
+        await db.deletePortOrder(input.id);
+        return { success: true };
+      }),
+  }),
+
   // ============ SYSTEM SETTINGS ============
   settings: router({
     get: adminProcedure

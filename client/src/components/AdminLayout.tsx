@@ -19,7 +19,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot } from "lucide-react";
+import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot, Ship } from "lucide-react";
 import { CSSProperties, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "./ui/button";
@@ -31,6 +31,7 @@ const menuItems = [
   { icon: PhoneCall, label: "Phone Numbers", path: "/admin/phone-numbers" },
   { icon: Headphones, label: "SIP Endpoints", path: "/admin/sip-endpoints" },
   { icon: Bot, label: "AI Agents", path: "/admin/ai-agents" },
+  { icon: Ship, label: "Number Porting", path: "/admin/porting" },
   { icon: ArrowLeftRight, label: "Import", path: "/admin/import" },
   { icon: Settings, label: "Settings", path: "/admin/settings" },
 ];
