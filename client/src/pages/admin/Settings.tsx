@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings as SettingsIcon, Key, Globe, Bot } from "lucide-react";
+import { Settings as SettingsIcon, Key, Globe, Bot, MessageSquare, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { useState, useEffect } from "react";
@@ -12,7 +12,10 @@ import { useState, useEffect } from "react";
 const SETTING_KEYS = [
   "telnyx_api_key",
   "telnyx_sip_connection_id",
+  "telnyx_messaging_profile_id",
+  "telnyx_webhook_secret",
   "retell_api_key",
+  "retell_sip_uri",
   "default_retention_days",
   "max_endpoints_per_customer",
 ];
@@ -20,7 +23,10 @@ const SETTING_KEYS = [
 export default function AdminSettings() {
   const [telnyxApiKey, setTelnyxApiKey] = useState("");
   const [telnyxSipConnectionId, setTelnyxSipConnectionId] = useState("");
+  const [telnyxMsgProfileId, setTelnyxMsgProfileId] = useState("");
+  const [telnyxWebhookSecret, setTelnyxWebhookSecret] = useState("");
   const [retellApiKey, setRetellApiKey] = useState("");
+  const [retellSipUri, setRetellSipUri] = useState("");
   const [defaultRetention, setDefaultRetention] = useState("90");
   const [maxEndpoints, setMaxEndpoints] = useState("100");
 
@@ -42,7 +48,10 @@ export default function AdminSettings() {
       const d = settingsQuery.data;
       if (d.telnyx_api_key) setTelnyxApiKey(d.telnyx_api_key);
       if (d.telnyx_sip_connection_id) setTelnyxSipConnectionId(d.telnyx_sip_connection_id);
+      if (d.telnyx_messaging_profile_id) setTelnyxMsgProfileId(d.telnyx_messaging_profile_id);
+      if (d.telnyx_webhook_secret) setTelnyxWebhookSecret(d.telnyx_webhook_secret);
       if (d.retell_api_key) setRetellApiKey(d.retell_api_key);
+      if (d.retell_sip_uri) setRetellSipUri(d.retell_sip_uri);
       if (d.default_retention_days) setDefaultRetention(d.default_retention_days);
       if (d.max_endpoints_per_customer) setMaxEndpoints(d.max_endpoints_per_customer);
     }
@@ -53,6 +62,8 @@ export default function AdminSettings() {
       settings: {
         telnyx_api_key: telnyxApiKey || null,
         telnyx_sip_connection_id: telnyxSipConnectionId || null,
+        telnyx_messaging_profile_id: telnyxMsgProfileId || null,
+        telnyx_webhook_secret: telnyxWebhookSecret || null,
       },
     });
   }
@@ -61,6 +72,7 @@ export default function AdminSettings() {
     saveMutation.mutate({
       settings: {
         retell_api_key: retellApiKey || null,
+        retell_sip_uri: retellSipUri || null,
       },
     });
   }
@@ -73,6 +85,8 @@ export default function AdminSettings() {
       },
     });
   }
+
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   return (
     <AdminLayout title="Settings">
@@ -88,7 +102,7 @@ export default function AdminSettings() {
               </Badge>
             </CardTitle>
             <CardDescription>
-              Configure your Telnyx account credentials for managing telephony
+              Configure your Telnyx account credentials for voice, SMS, and number management
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -107,12 +121,45 @@ export default function AdminSettings() {
                 <Label htmlFor="sipConnectionId">SIP Connection ID</Label>
                 <Input
                   id="sipConnectionId"
-                  placeholder="xxxxxxxxxxxxxxxx"
+                  placeholder="28977960258..."
                   value={telnyxSipConnectionId}
                   onChange={(e) => setTelnyxSipConnectionId(e.target.value)}
                 />
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="msgProfileId">Messaging Profile ID</Label>
+                <Input
+                  id="msgProfileId"
+                  placeholder="40019c6f-131e-..."
+                  value={telnyxMsgProfileId}
+                  onChange={(e) => setTelnyxMsgProfileId(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required for SMS. Found in Telnyx Portal under Messaging &gt; Profiles.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="webhookSecret">Webhook Secret</Label>
+                <Input
+                  id="webhookSecret"
+                  type="password"
+                  placeholder="fRT5A1py..."
+                  value={telnyxWebhookSecret}
+                  onChange={(e) => setTelnyxWebhookSecret(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used to verify incoming Telnyx webhooks.
+                </p>
+              </div>
             </div>
+            {telnyxStatus.data?.configured && (
+              <div className="text-xs text-muted-foreground space-y-1 bg-muted/50 rounded p-3">
+                <p><span className="font-medium">API Key:</span> {telnyxStatus.data.apiKey}</p>
+                <p><span className="font-medium">SIP Connection:</span> {telnyxStatus.data.sipConnectionId}</p>
+                <p><span className="font-medium">Messaging Profile:</span> {(telnyxStatus.data as any).messagingProfileId || "Not set"}</p>
+                <p><span className="font-medium">SIP Domain:</span> {(telnyxStatus.data as any).sipDomain || "sip.telnyx.com"}</p>
+              </div>
+            )}
             <Button onClick={saveTelnyxConfig} disabled={saveMutation.isPending}>
               {saveMutation.isPending ? "Saving..." : "Save Telnyx Configuration"}
             </Button>
@@ -134,7 +181,7 @@ export default function AdminSettings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="retellApiKey">Retell API Key</Label>
                 <Input
@@ -148,7 +195,25 @@ export default function AdminSettings() {
                   Find your API key in the Retell AI dashboard under Settings.
                 </p>
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retellSipUri">Retell SIP URI</Label>
+                <Input
+                  id="retellSipUri"
+                  placeholder="sip:xxxxx.sip.livekit.cloud"
+                  value={retellSipUri}
+                  onChange={(e) => setRetellSipUri(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The SIP endpoint Retell uses for call routing. Found in Retell dashboard.
+                </p>
+              </div>
             </div>
+            {retellStatus.data?.configured && (
+              <div className="text-xs text-muted-foreground space-y-1 bg-muted/50 rounded p-3">
+                <p><span className="font-medium">API Key:</span> {retellStatus.data.apiKey}</p>
+                <p><span className="font-medium">SIP URI:</span> {(retellStatus.data as any).sipUri || "Not set"}</p>
+              </div>
+            )}
             <Button onClick={saveRetellConfig} disabled={saveMutation.isPending}>
               {saveMutation.isPending ? "Saving..." : "Save Retell Configuration"}
             </Button>
@@ -160,32 +225,40 @@ export default function AdminSettings() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Globe className="h-5 w-5" />
-              Webhook Configuration
+              Webhook Endpoints
             </CardTitle>
             <CardDescription>
-              Webhook endpoints for call events and notifications
+              Configure these URLs in your Telnyx and Retell dashboards to receive events
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label>Telnyx Webhook URL</Label>
-                <Input
-                  disabled
-                  value={typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/voice` : ""}
-                />
+                <Label>Voice Webhook (Telnyx TeXML)</Label>
+                <Input disabled value={`${baseUrl}/api/webhooks/voice`} />
                 <p className="text-xs text-muted-foreground">
-                  Configure this URL as the Voice webhook in your Telnyx TeXML Application settings.
+                  Set as the Voice URL in your Telnyx TeXML Application. Handles inbound call routing.
                 </p>
               </div>
               <div className="grid gap-2">
-                <Label>Retell AI Webhook URL</Label>
-                <Input
-                  disabled
-                  value={typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/retell` : ""}
-                />
+                <Label>Call Status Webhook</Label>
+                <Input disabled value={`${baseUrl}/api/webhooks/status`} />
                 <p className="text-xs text-muted-foreground">
-                  Set this as the webhook URL when creating Retell agents, or as account-level webhook in the Retell dashboard.
+                  Set as the Status Callback URL. Tracks call completion and updates usage stats.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label>Recording Webhook</Label>
+                <Input disabled value={`${baseUrl}/api/webhooks/recording`} />
+                <p className="text-xs text-muted-foreground">
+                  Set as the Recording Status Callback. Processes completed recordings and triggers SMS summaries.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label>Retell AI Webhook</Label>
+                <Input disabled value={`${baseUrl}/api/webhooks/retell`} />
+                <p className="text-xs text-muted-foreground">
+                  Set in the Retell dashboard under Agent settings or account-level webhook.
                 </p>
               </div>
             </div>

@@ -759,6 +759,27 @@ export const appRouter = router({
         return telnyx.releasePhoneNumber(input.id);
       }),
 
+    // Send SMS
+    sendSms: adminProcedure
+      .input(z.object({
+        from: z.string().min(1),
+        to: z.string().min(1),
+        body: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        return telnyx.sendSms(input);
+      }),
+
+    // List SMS messages
+    listMessages: adminProcedure
+      .input(z.object({
+        from: z.string().optional(),
+        to: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return telnyx.listMessages(input);
+      }),
+
     // List calls
     listCalls: adminProcedure
       .input(z.object({

@@ -39,7 +39,7 @@ export default function CustomerEndpoints() {
     displayName: "",
     extensionNumber: "",
     callerId: "",
-    callHandler: "laml_webhooks" as "laml_webhooks" | "relay_context" | "relay_topic" | "ai_agent" | "video_room",
+    callHandler: "texml_webhooks" as "texml_webhooks" | "call_control" | "ai_agent" | "video_room",
   });
 
   const { data: endpoints, isLoading, refetch } = trpc.sipEndpoints.list.useQuery({ customerId });
@@ -48,7 +48,7 @@ export default function CustomerEndpoints() {
     onSuccess: () => {
       toast.success("Endpoint created successfully");
       setIsCreateOpen(false);
-      setNewEndpoint({ username: "", displayName: "", extensionNumber: "", callerId: "", callHandler: "laml_webhooks" });
+      setNewEndpoint({ username: "", displayName: "", extensionNumber: "", callerId: "", callHandler: "texml_webhooks" });
       refetch();
     },
     onError: (error) => {
@@ -158,9 +158,8 @@ export default function CustomerEndpoints() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="laml_webhooks">LaML Webhooks</SelectItem>
-                      <SelectItem value="relay_context">Relay Context</SelectItem>
-                      <SelectItem value="relay_topic">Relay Topic</SelectItem>
+                      <SelectItem value="texml_webhooks">TeXML Webhooks</SelectItem>
+                      <SelectItem value="call_control">Call Control</SelectItem>
                       <SelectItem value="ai_agent">AI Agent</SelectItem>
                       <SelectItem value="video_room">Video Room</SelectItem>
                     </SelectContent>

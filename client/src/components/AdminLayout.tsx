@@ -19,7 +19,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
-import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot, Ship } from "lucide-react";
+import { LayoutDashboard, LogOut, Users, Settings, Phone, PhoneCall, Headphones, ArrowLeftRight, Bot, Ship, BookOpen } from "lucide-react";
 import { CSSProperties, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "./ui/button";
@@ -34,6 +34,7 @@ const menuItems = [
   { icon: Ship, label: "Number Porting", path: "/admin/porting" },
   { icon: ArrowLeftRight, label: "Import", path: "/admin/import" },
   { icon: Settings, label: "Settings", path: "/admin/settings" },
+  { icon: BookOpen, label: "Setup Guide", path: "/admin/guide" },
 ];
 
 export default function AdminLayout({

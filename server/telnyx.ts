@@ -9,6 +9,9 @@ import * as db from "./db";
 // Get credentials from environment (fallback)
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY || "";
 const TELNYX_SIP_CONNECTION_ID = process.env.TELNYX_SIP_CONNECTION_ID || "";
+const TELNYX_MESSAGING_PROFILE_ID = process.env.TELNYX_MESSAGING_PROFILE_ID || "";
+const TELNYX_WEBHOOK_SECRET = process.env.TELNYX_WEBHOOK_SECRET || "";
+const TELNYX_SIP_DOMAIN = process.env.TELNYX_SIP_DOMAIN || "sip.telnyx.com";
 
 // Base URL for Telnyx API v2
 const BASE_URL = "https://api.telnyx.com/v2";
@@ -230,13 +233,16 @@ export interface SendSmsParams {
 }
 
 export async function sendSms(params: SendSmsParams) {
-  const client = createClient();
-  const response = await client.post("/messages", {
+  const client = await createDynamicClient();
+  const msgProfileId = await getMessagingProfileId();
+  const body: Record<string, unknown> = {
     from: params.from,
     to: params.to,
     text: params.body,
     type: "SMS",
-  });
+  };
+  if (msgProfileId) body.messaging_profile_id = msgProfileId;
+  const response = await client.post("/messages", body);
   return response.data.data;
 }
 
@@ -448,10 +454,15 @@ export async function isConfiguredAsync(): Promise<boolean> {
 export async function getCredentialsSummary() {
   const apiKey = await getApiKey();
   const connId = await getSipConnectionId();
+  const msgProfileId = await getMessagingProfileId();
+  const webhookSecret = await getWebhookSecret();
   return {
     configured: !!(apiKey && connId),
     apiKey: apiKey ? `${apiKey.substring(0, 12)}...` : "Not set",
     sipConnectionId: connId || "Not set",
+    messagingProfileId: msgProfileId || "Not set",
+    webhookSecret: webhookSecret ? `${webhookSecret.substring(0, 8)}...` : "Not set",
+    sipDomain: getSipDomain(),
   };
 }
 
@@ -459,8 +470,18 @@ export async function getCredentialsSummary() {
  * Get the SIP domain for Telnyx
  * Telnyx SIP credentials register against sip.telnyx.com
  */
+export async function getMessagingProfileId(): Promise<string> {
+  const dbVal = await db.getSystemSetting("telnyx_messaging_profile_id");
+  return dbVal || TELNYX_MESSAGING_PROFILE_ID;
+}
+
+export async function getWebhookSecret(): Promise<string> {
+  const dbVal = await db.getSystemSetting("telnyx_webhook_secret");
+  return dbVal || TELNYX_WEBHOOK_SECRET;
+}
+
 export function getSipDomain(): string {
-  return "sip.telnyx.com";
+  return TELNYX_SIP_DOMAIN;
 }
 
 // ============ TeXML Generation (TwiML-compatible) ============

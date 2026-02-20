@@ -7,6 +7,7 @@ import Retell from "retell-sdk";
 import * as db from "./db";
 
 const RETELL_API_KEY = process.env.RETELL_API_KEY || "";
+const RETELL_SIP_URI = process.env.RETELL_SIP_URI || "";
 
 // Lazy-initialized client (created on first use)
 let _client: Retell | null = null;
@@ -34,11 +35,18 @@ export async function isConfigured(): Promise<boolean> {
   return !!key;
 }
 
+export async function getSipUri(): Promise<string> {
+  const dbVal = await db.getSystemSetting("retell_sip_uri");
+  return dbVal || RETELL_SIP_URI;
+}
+
 export async function getConfigSummary() {
   const key = await getApiKey();
+  const sipUri = await getSipUri();
   return {
     configured: !!key,
     apiKey: key ? `${key.substring(0, 12)}...` : "Not set",
+    sipUri: sipUri || "Not set",
   };
 }
 

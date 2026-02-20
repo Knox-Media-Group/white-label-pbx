@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Phone, Search, Plus, Trash2, Settings, Loader2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Phone, Search, Plus, Trash2, Settings, Loader2, MessageSquare, Send } from "lucide-react";
 
 export default function AdminPhoneNumbers() {
   const [searchAreaCode, setSearchAreaCode] = useState("");
@@ -21,6 +22,10 @@ export default function AdminPhoneNumbers() {
   const [isPurchaseDialogOpen, setIsPurchaseDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<string>("");
   const [friendlyName, setFriendlyName] = useState("");
+  const [smsDialogOpen, setSmsDialogOpen] = useState(false);
+  const [smsFrom, setSmsFrom] = useState("");
+  const [smsTo, setSmsTo] = useState("");
+  const [smsBody, setSmsBody] = useState("");
 
   const { data: ownedNumbers, isLoading: loadingOwned, refetch: refetchOwned } = trpc.telnyxApi.listPhoneNumbers.useQuery();
   const { data: telnyxStatus } = trpc.telnyxApi.status.useQuery();
@@ -40,6 +45,18 @@ export default function AdminPhoneNumbers() {
     },
     onError: (error) => {
       toast.error(`Failed to purchase number: ${error.message}`);
+    },
+  });
+
+  const sendSms = trpc.telnyxApi.sendSms.useMutation({
+    onSuccess: () => {
+      toast.success("SMS sent successfully!");
+      setSmsDialogOpen(false);
+      setSmsTo("");
+      setSmsBody("");
+    },
+    onError: (error) => {
+      toast.error(`Failed to send SMS: ${error.message}`);
     },
   });
 
@@ -224,6 +241,17 @@ export default function AdminPhoneNumbers() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Send SMS"
+                            onClick={() => {
+                              setSmsFrom(number.phone_number);
+                              setSmsDialogOpen(true);
+                            }}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
                           <Button variant="ghost" size="icon">
                             <Settings className="h-4 w-4" />
                           </Button>
@@ -250,6 +278,54 @@ export default function AdminPhoneNumbers() {
             )}
           </CardContent>
         </Card>
+
+        {/* SMS Dialog */}
+        <Dialog open={smsDialogOpen} onOpenChange={setSmsDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Send SMS</DialogTitle>
+              <DialogDescription>
+                Send a text message from your Telnyx number.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>From</Label>
+                <Input disabled value={formatPhoneNumber(smsFrom)} />
+              </div>
+              <div className="space-y-2">
+                <Label>To</Label>
+                <Input
+                  placeholder="+1234567890"
+                  value={smsTo}
+                  onChange={(e) => setSmsTo(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Message</Label>
+                <Textarea
+                  placeholder="Type your message..."
+                  value={smsBody}
+                  onChange={(e) => setSmsBody(e.target.value)}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">{smsBody.length}/160 characters</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSmsDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => sendSms.mutate({ from: smsFrom, to: smsTo, body: smsBody })}
+                disabled={sendSms.isPending || !smsTo || !smsBody}
+              >
+                {sendSms.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Send className="h-4 w-4 mr-2" />}
+                Send SMS
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Purchase Dialog */}
         <Dialog open={isPurchaseDialogOpen} onOpenChange={setIsPurchaseDialogOpen}>

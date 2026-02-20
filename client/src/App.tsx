@@ -16,6 +16,7 @@ import AdminSipEndpoints from "./pages/admin/SipEndpoints";
 import AdminViirtueImport from "./pages/admin/ViirtueImport";
 import AdminRetellAgents from "./pages/admin/RetellAgents";
 import AdminPorting from "./pages/admin/Porting";
+import AdminGuide from "./pages/admin/Guide";
 
 // Customer Portal Pages
 import CustomerDashboard from "./pages/customer/Dashboard";
@@ -43,6 +44,7 @@ function Router() {
       <Route path="/admin/import" component={AdminViirtueImport} />
       <Route path="/admin/ai-agents" component={AdminRetellAgents} />
       <Route path="/admin/porting" component={AdminPorting} />
+      <Route path="/admin/guide" component={AdminGuide} />
 
       {/* Customer Portal Routes */}
       <Route path="/portal" component={CustomerDashboard} />
