@@ -281,10 +281,8 @@ export async function deleteRecording(id: string) {
 }
 
 // ============ Number Porting ============
-
-export interface CheckPortabilityParams {
-  phoneNumbers: string[];
-}
+// Telnyx V2 porting flow: POST creates draft (phone numbers only),
+// PATCH adds end-user details + documents, then confirm submits it.
 
 export async function checkPortability(phoneNumbers: string[]) {
   const client = await createDynamicClient();
@@ -294,54 +292,109 @@ export async function checkPortability(phoneNumbers: string[]) {
   return response.data.data;
 }
 
-export interface CreatePortOrderParams {
-  phoneNumbers: string[];
-  connectionId?: string;
-  // Authorized contact
-  authorizedName: string;
-  // Current carrier info
-  losingCarrierName?: string;
+/**
+ * Step 1: Create a draft port order (only phone numbers accepted in POST)
+ */
+export async function createPortOrder(phoneNumbers: string[], customerReference?: string) {
+  const client = await createDynamicClient();
+  const body: Record<string, unknown> = {
+    phone_numbers: phoneNumbers.map(pn => ({ phone_number: pn })),
+  };
+  if (customerReference) body.customer_reference = customerReference;
+  const response = await client.post("/porting_orders", body);
+  return response.data.data;
+}
+
+/**
+ * Step 2: Update the draft with end-user details, documents, and phone number config
+ */
+export interface UpdatePortOrderParams {
+  // End-user admin info
+  authorizedName?: string;
+  businessName?: string;
+  billingPhoneNumber?: string;
   accountNumber?: string;
   accountPin?: string;
-  // Business / subscriber info
-  businessName?: string;
-  // Service address
+  // End-user service address
   streetAddress?: string;
   city?: string;
   state?: string;
   zip?: string;
   country?: string;
+  // Documents (UUIDs from /documents upload)
+  loaDocumentId?: string;
+  invoiceDocumentId?: string;
+  // Phone number config
+  connectionId?: string;
+  // FOC date
+  focDateRequested?: string;
 }
 
-export async function createPortOrder(params: CreatePortOrderParams) {
+export async function updatePortOrder(portOrderId: string, params: UpdatePortOrderParams) {
   const client = await createDynamicClient();
   const connId = await getSipConnectionId();
 
-  const body: Record<string, unknown> = {
-    phone_numbers: params.phoneNumbers.map(pn => ({ phone_number: pn })),
-    connection_id: params.connectionId || connId,
-    port_type: "manual",
-  };
+  const body: Record<string, unknown> = {};
 
-  // Add optional fields
-  if (params.authorizedName) body.authorized_name = params.authorizedName;
-  if (params.businessName) body.business_name = params.businessName;
-  if (params.losingCarrierName) body.losing_carrier_name = params.losingCarrierName;
-  if (params.accountNumber) body.account_number = params.accountNumber;
-  if (params.accountPin) body.account_pin = params.accountPin;
+  // End-user info
+  const admin: Record<string, string> = {};
+  if (params.authorizedName) admin.auth_person_name = params.authorizedName;
+  if (params.businessName) admin.entity_name = params.businessName;
+  if (params.billingPhoneNumber) admin.billing_phone_number = params.billingPhoneNumber;
+  if (params.accountNumber) admin.account_number = params.accountNumber;
+  if (params.accountPin) admin.pin_passcode = params.accountPin;
 
-  if (params.streetAddress) {
-    body.old_service_address = {
-      street_address: params.streetAddress,
-      city: params.city,
-      state: params.state,
-      zip: params.zip,
-      country: params.country || "US",
+  const location: Record<string, string> = {};
+  if (params.streetAddress) location.street_address = params.streetAddress;
+  if (params.city) location.locality = params.city;
+  if (params.state) location.administrative_area = params.state;
+  if (params.zip) location.postal_code = params.zip;
+  location.country_code = params.country || "US";
+
+  if (Object.keys(admin).length > 0 || Object.keys(location).length > 1) {
+    body.end_user = {
+      ...(Object.keys(admin).length > 0 ? { admin } : {}),
+      ...(Object.keys(location).length > 1 ? { location } : {}),
     };
   }
 
-  const response = await client.post("/porting_orders", body);
+  // Documents
+  if (params.loaDocumentId || params.invoiceDocumentId) {
+    const docs: Record<string, string> = {};
+    if (params.loaDocumentId) docs.loa = params.loaDocumentId;
+    if (params.invoiceDocumentId) docs.invoice = params.invoiceDocumentId;
+    body.documents = docs;
+  }
+
+  // Phone number configuration
+  body.phone_number_configuration = {
+    connection_id: params.connectionId || connId,
+  };
+
+  // Activation settings
+  if (params.focDateRequested) {
+    body.activation_settings = {
+      foc_datetime_requested: params.focDateRequested,
+    };
+  }
+
+  const response = await client.patch(`/porting_orders/${portOrderId}`, body);
   return response.data.data;
+}
+
+/**
+ * Upload a document (LOA or invoice) for porting
+ */
+export async function uploadPortingDocument(fileBuffer: Buffer, filename: string) {
+  const client = await createDynamicClient();
+  const FormData = (await import("form-data")).default;
+  const form = new FormData();
+  form.append("file", fileBuffer, { filename });
+
+  const response = await client.post("/documents", form, {
+    headers: form.getHeaders(),
+  });
+  return response.data.data; // { id: "doc-uuid" }
 }
 
 export async function getPortOrder(portOrderId: string) {
@@ -359,12 +412,21 @@ export async function listPortOrders(params?: { status?: string; pageSize?: numb
   return response.data;
 }
 
+export async function getAllowedFocWindows(portOrderId: string) {
+  const client = await createDynamicClient();
+  const response = await client.get(`/porting_orders/${portOrderId}/allowed_foc_windows`);
+  return response.data.data;
+}
+
 export async function cancelPortOrder(portOrderId: string) {
   const client = await createDynamicClient();
   const response = await client.post(`/porting_orders/${portOrderId}/actions/cancel`);
   return response.data.data;
 }
 
+/**
+ * Step 3: Confirm/submit the port order (transitions draft -> in-process)
+ */
 export async function confirmPortOrder(portOrderId: string) {
   const client = await createDynamicClient();
   const response = await client.post(`/porting_orders/${portOrderId}/actions/confirm`);

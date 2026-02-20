@@ -8,7 +8,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import {
   Ship, Plus, RefreshCw, Loader2, CheckCircle2, XCircle,
-  AlertTriangle, Clock, Send, Trash2, ArrowRight,
+  AlertTriangle, Clock, Send, Trash2, Upload, FileText,
 } from "lucide-react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -80,6 +80,9 @@ export default function Porting() {
     notes: "",
   });
   const [selectedPhoneNumberIds, setSelectedPhoneNumberIds] = useState<number[]>([]);
+  const [uploadingForOrderId, setUploadingForOrderId] = useState<number | null>(null);
+  const [uploadType, setUploadType] = useState<"loa" | "invoice">("loa");
+  const [isUploading, setIsUploading] = useState(false);
 
   const portOrdersQuery = trpc.portOrders.list.useQuery();
   const customersQuery = trpc.customers.list.useQuery();
@@ -130,6 +133,51 @@ export default function Porting() {
     },
     onError: (error) => toast.error(error.message),
   });
+
+  const uploadDocMutation = trpc.portOrders.uploadDocument.useMutation();
+  const attachDocMutation = trpc.portOrders.attachDocuments.useMutation({
+    onSuccess: () => {
+      toast.success("Document attached to port order");
+      setUploadingForOrderId(null);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingForOrderId) return;
+
+    setIsUploading(true);
+    try {
+      // Read file as base64
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(",")[1]); // Strip data:...;base64, prefix
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Upload to Telnyx
+      const { documentId } = await uploadDocMutation.mutateAsync({
+        fileBase64: base64,
+        filename: file.name,
+      });
+
+      // Attach to the port order
+      await attachDocMutation.mutateAsync({
+        id: uploadingForOrderId,
+        ...(uploadType === "loa" ? { loaDocumentId: documentId } : { invoiceDocumentId: documentId }),
+      });
+    } catch {
+      // Errors handled by mutation callbacks
+    } finally {
+      setIsUploading(false);
+      e.target.value = ""; // Reset file input
+    }
+  };
 
   const resetForm = () => {
     setSelectedCustomerId("");
@@ -297,8 +345,17 @@ export default function Porting() {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                title="Upload LOA"
+                                onClick={() => { setUploadingForOrderId(order.id); setUploadType("loa"); }}
+                              >
+                                <FileText className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => syncMutation.mutate({ id: order.id })}
                                 disabled={syncMutation.isPending}
+                                title="Sync status from Telnyx"
                               >
                                 {syncMutation.isPending ? (
                                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -310,6 +367,7 @@ export default function Porting() {
                                 size="sm"
                                 variant="outline"
                                 className="text-red-600"
+                                title="Cancel port order"
                                 onClick={() => {
                                   if (confirm("Cancel this port order?")) {
                                     cancelMutation.mutate({ id: order.id });
@@ -530,6 +588,56 @@ export default function Porting() {
                   <Plus className="h-4 w-4 mr-1" />
                 )}
                 Create Draft
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {/* Document Upload Dialog */}
+        <Dialog open={uploadingForOrderId !== null} onOpenChange={(open) => { if (!open) setUploadingForOrderId(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Upload Document</DialogTitle>
+              <DialogDescription>
+                Upload a signed LOA (Letter of Authorization) or recent invoice for port order #{uploadingForOrderId}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Document Type</Label>
+                <Select value={uploadType} onValueChange={(v) => setUploadType(v as "loa" | "invoice")}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="loa">LOA (Letter of Authorization)</SelectItem>
+                    <SelectItem value="invoice">Recent Invoice</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {uploadType === "loa"
+                    ? "A signed letter authorizing the number transfer. Must be signed within 90 days."
+                    : "A recent invoice from the current carrier. Must be within 30 days."}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>File (PDF)</Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                />
+              </div>
+              {isUploading && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Uploading and attaching document...
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setUploadingForOrderId(null)} disabled={isUploading}>
+                Close
               </Button>
             </DialogFooter>
           </DialogContent>

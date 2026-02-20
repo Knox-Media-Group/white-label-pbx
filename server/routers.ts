@@ -1222,7 +1222,7 @@ Example output:
         return { id, phoneNumbers: phoneNumberStrings };
       }),
 
-    // Submit a draft port order to Telnyx
+    // Submit a draft port order to Telnyx (3-step: create → update → confirm)
     submit: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
@@ -1240,11 +1240,18 @@ Example output:
         }
 
         try {
-          const telnyxOrder = await telnyx.createPortOrder({
-            phoneNumbers: phoneNums,
-            authorizedName: order.authorizedName || '',
+          // Step 1: Create draft on Telnyx (phone numbers only)
+          const telnyxOrder = await telnyx.createPortOrder(
+            phoneNums,
+            `port-order-${order.id}`,
+          );
+          const telnyxId = telnyxOrder.id;
+
+          // Step 2: Update with end-user details and phone number config
+          await telnyx.updatePortOrder(telnyxId, {
+            authorizedName: order.authorizedName || undefined,
             businessName: order.businessName || undefined,
-            losingCarrierName: order.losingCarrier || undefined,
+            billingPhoneNumber: phoneNums[0], // Use first number as BTN
             accountNumber: order.accountNumber || undefined,
             accountPin: order.accountPin || undefined,
             streetAddress: order.streetAddress || undefined,
@@ -1253,8 +1260,11 @@ Example output:
             zip: order.zip || undefined,
           });
 
+          // Step 3: Confirm/submit the port order
+          await telnyx.confirmPortOrder(telnyxId);
+
           await db.updatePortOrder(input.id, {
-            telnyxPortOrderId: telnyxOrder.id,
+            telnyxPortOrderId: telnyxId,
             status: 'submitted',
           });
 
@@ -1264,7 +1274,7 @@ Example output:
             await db.updatePhoneNumber(pnId, { status: 'porting' });
           }
 
-          return { success: true, telnyxPortOrderId: telnyxOrder.id };
+          return { success: true, telnyxPortOrderId: telnyxId };
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Telnyx API error';
           await db.updatePortOrder(input.id, { lastError: msg });
@@ -1342,6 +1352,37 @@ Example output:
           }
         }
 
+        return { success: true };
+      }),
+
+    // Upload a document (LOA or invoice) for porting
+    uploadDocument: adminProcedure
+      .input(z.object({
+        fileBase64: z.string().min(1),
+        filename: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const buffer = Buffer.from(input.fileBase64, 'base64');
+        const result = await telnyx.uploadPortingDocument(buffer, input.filename);
+        return { documentId: result.id };
+      }),
+
+    // Attach uploaded documents to a port order on Telnyx
+    attachDocuments: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        loaDocumentId: z.string().optional(),
+        invoiceDocumentId: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const order = await db.getPortOrderById(input.id);
+        if (!order || !order.telnyxPortOrderId) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Port order not found or not submitted to Telnyx' });
+        }
+        await telnyx.updatePortOrder(order.telnyxPortOrderId, {
+          loaDocumentId: input.loaDocumentId,
+          invoiceDocumentId: input.invoiceDocumentId,
+        });
         return { success: true };
       }),
 
