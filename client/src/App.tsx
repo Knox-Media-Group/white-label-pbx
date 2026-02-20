@@ -28,6 +28,7 @@ import CustomerRingGroups from "./pages/customer/RingGroups";
 import CustomerCallRoutes from "./pages/customer/CallRoutes";
 import CustomerRecordings from "./pages/customer/Recordings";
 import CustomerBranding from "./pages/customer/Branding";
+import CustomerPortingStatus from "./pages/customer/PortingStatus";
 import CustomerSettings from "./pages/customer/Settings";
 
 function Router() {
@@ -57,6 +58,7 @@ function Router() {
       <Route path="/portal/ring-groups" component={CustomerRingGroups} />
       <Route path="/portal/call-routes" component={CustomerCallRoutes} />
       <Route path="/portal/recordings" component={CustomerRecordings} />
+      <Route path="/portal/porting" component={CustomerPortingStatus} />
       <Route path="/portal/branding" component={CustomerBranding} />
       <Route path="/portal/settings" component={CustomerSettings} />
       

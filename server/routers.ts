@@ -1218,6 +1218,16 @@ Example output:
         return db.getAllPortOrders();
       }),
 
+    // Customer-accessible: list port orders for their own account
+    listByCustomer: customerProcedure
+      .input(z.object({ customerId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
+          throw new TRPCError({ code: 'FORBIDDEN' });
+        }
+        return db.getPortOrdersByCustomer(input.customerId);
+      }),
+
     getById: adminProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
