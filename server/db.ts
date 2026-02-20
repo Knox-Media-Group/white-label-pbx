@@ -1,5 +1,6 @@
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import {
   InsertUser, users,
   customers, InsertCustomer, Customer,
@@ -24,7 +25,8 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const client = postgres(process.env.DATABASE_URL);
+      _db = drizzle(client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -86,7 +88,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+    await db.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -131,8 +133,8 @@ export async function updateUserPassword(id: number, passwordHash: string): Prom
 export async function createCustomer(customer: InsertCustomer): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(customers).values(customer);
-  return result[0].insertId;
+  const result = await db.insert(customers).values(customer).returning({ id: customers.id });
+  return result[0].id;
 }
 
 export async function getCustomerById(id: number): Promise<Customer | undefined> {
@@ -176,8 +178,8 @@ export async function getCustomerStats(): Promise<{ total: number; active: numbe
 export async function createSipEndpoint(endpoint: InsertSipEndpoint): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(sipEndpoints).values(endpoint);
-  return result[0].insertId;
+  const result = await db.insert(sipEndpoints).values(endpoint).returning({ id: sipEndpoints.id });
+  return result[0].id;
 }
 
 export async function getSipEndpointById(id: number): Promise<SipEndpoint | undefined> {
@@ -209,8 +211,8 @@ export async function deleteSipEndpoint(id: number): Promise<void> {
 export async function createPhoneNumber(phone: InsertPhoneNumber): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(phoneNumbers).values(phone);
-  return result[0].insertId;
+  const result = await db.insert(phoneNumbers).values(phone).returning({ id: phoneNumbers.id });
+  return result[0].id;
 }
 
 export async function getPhoneNumberById(id: number): Promise<PhoneNumber | undefined> {
@@ -242,8 +244,8 @@ export async function deletePhoneNumber(id: number): Promise<void> {
 export async function createRingGroup(group: InsertRingGroup): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(ringGroups).values(group);
-  return result[0].insertId;
+  const result = await db.insert(ringGroups).values(group).returning({ id: ringGroups.id });
+  return result[0].id;
 }
 
 export async function getRingGroupById(id: number): Promise<RingGroup | undefined> {
@@ -275,8 +277,8 @@ export async function deleteRingGroup(id: number): Promise<void> {
 export async function createCallRoute(route: InsertCallRoute): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(callRoutes).values(route);
-  return result[0].insertId;
+  const result = await db.insert(callRoutes).values(route).returning({ id: callRoutes.id });
+  return result[0].id;
 }
 
 export async function getCallRouteById(id: number): Promise<CallRoute | undefined> {
@@ -308,8 +310,8 @@ export async function deleteCallRoute(id: number): Promise<void> {
 export async function createUsageStats(stats: InsertUsageStats): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(usageStats).values(stats);
-  return result[0].insertId;
+  const result = await db.insert(usageStats).values(stats).returning({ id: usageStats.id });
+  return result[0].id;
 }
 
 export async function getUsageStatsByCustomer(customerId: number, limit = 30): Promise<UsageStats[]> {
@@ -338,8 +340,8 @@ export async function getGlobalUsageStats(): Promise<{ totalCalls: number; total
 export async function createCallRecording(recording: InsertCallRecording): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(callRecordings).values(recording);
-  return result[0].insertId;
+  const result = await db.insert(callRecordings).values(recording).returning({ id: callRecordings.id });
+  return result[0].id;
 }
 
 export async function getCallRecordingById(id: number): Promise<CallRecording | undefined> {
@@ -371,8 +373,8 @@ export async function deleteCallRecording(id: number): Promise<void> {
 export async function createNotification(notification: InsertNotification): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(notifications).values(notification);
-  return result[0].insertId;
+  const result = await db.insert(notifications).values(notification).returning({ id: notifications.id });
+  return result[0].id;
 }
 
 export async function getNotificationsByCustomer(customerId: number, limit = 50): Promise<Notification[]> {
@@ -416,8 +418,8 @@ export async function upsertNotificationSettings(customerId: number, settings: P
 export async function createLlmCallFlow(flow: InsertLlmCallFlow): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(llmCallFlows).values(flow);
-  return result[0].insertId;
+  const result = await db.insert(llmCallFlows).values(flow).returning({ id: llmCallFlows.id });
+  return result[0].id;
 }
 
 export async function getLlmCallFlowsByCustomer(customerId: number): Promise<LlmCallFlow[]> {
@@ -516,8 +518,8 @@ export async function incrementUsageStats(customerId: number, increments: {
 export async function createRetellAgent(agent: InsertRetellAgent): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(retellAgents).values(agent);
-  return result[0].insertId;
+  const result = await db.insert(retellAgents).values(agent).returning({ id: retellAgents.id });
+  return result[0].id;
 }
 
 export async function getRetellAgentById(id: number): Promise<RetellAgent | undefined> {
@@ -549,8 +551,8 @@ export async function deleteRetellAgent(id: number): Promise<void> {
 export async function createVoipPhone(phone: InsertVoipPhone): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(voipPhones).values(phone);
-  return result[0].insertId;
+  const result = await db.insert(voipPhones).values(phone).returning({ id: voipPhones.id });
+  return result[0].id;
 }
 
 export async function getVoipPhoneById(id: number): Promise<VoipPhone | undefined> {
@@ -582,8 +584,8 @@ export async function deleteVoipPhone(id: number): Promise<void> {
 export async function createPortOrder(order: InsertPortOrder): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  const result = await db.insert(portOrders).values(order);
-  return result[0].insertId;
+  const result = await db.insert(portOrders).values(order).returning({ id: portOrders.id });
+  return result[0].id;
 }
 
 export async function getPortOrderById(id: number): Promise<PortOrder | undefined> {

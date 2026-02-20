@@ -23,11 +23,11 @@ async function ensureLocalCredentialsTable(): Promise<boolean> {
   try {
     await dbConn.execute(sql`
       CREATE TABLE IF NOT EXISTS local_credentials (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
         email VARCHAR(320) NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT NOW()
       )
     `);
     return true;
@@ -68,14 +68,14 @@ async function getAdminWithCredentials(dbConn: any): Promise<{
 } | null> {
   try {
     const result = await dbConn.execute(sql`
-      SELECT u.id, u.openId, u.email, u.name, lc.password_hash as passwordHash
+      SELECT u.id, u."openId", u.email, u.name, lc.password_hash as "passwordHash"
       FROM users u
       LEFT JOIN local_credentials lc ON lc.user_id = u.id
       WHERE u.role = 'admin'
       LIMIT 1
     `);
-    const rows = (result as any)?.[0] || (result as any)?.rows || result;
-    if (Array.isArray(rows) && rows.length > 0) {
+    const rows = Array.isArray(result) ? result : (result as any)?.rows || [];
+    if (rows.length > 0) {
       return rows[0] as any;
     }
     return null;
@@ -96,14 +96,14 @@ async function getUserByEmailWithCredentials(dbConn: any, email: string): Promis
 } | null> {
   try {
     const result = await dbConn.execute(sql`
-      SELECT u.id, u.openId, u.email, u.name, u.role, lc.password_hash as passwordHash
+      SELECT u.id, u."openId", u.email, u.name, u.role, lc.password_hash as "passwordHash"
       FROM users u
       LEFT JOIN local_credentials lc ON lc.user_id = u.id
       WHERE u.email = ${email}
       LIMIT 1
     `);
-    const rows = (result as any)?.[0] || (result as any)?.rows || result;
-    if (Array.isArray(rows) && rows.length > 0) {
+    const rows = Array.isArray(result) ? result : (result as any)?.rows || [];
+    if (rows.length > 0) {
       return rows[0] as any;
     }
     return null;
@@ -196,22 +196,17 @@ export function registerLocalAuthRoutes(app: Express) {
         // Update existing admin user's email/name
         userId = existingAdmin.id;
         await dbConn.execute(
-          sql`UPDATE users SET email = ${email}, name = ${name || "Admin"}, loginMethod = 'local', lastSignedIn = NOW() WHERE id = ${userId}`
+          sql`UPDATE users SET email = ${email}, name = ${name || "Admin"}, "loginMethod" = 'local', "lastSignedIn" = NOW() WHERE id = ${userId}`
         );
       } else {
         // Insert new admin user
-        const insertResult = await dbConn.execute(
-          sql`INSERT INTO users (openId, name, email, loginMethod, role, lastSignedIn, createdAt, updatedAt) VALUES (${openId}, ${name || "Admin"}, ${email}, 'local', 'admin', NOW(), NOW(), NOW())`
+        await dbConn.execute(
+          sql`INSERT INTO users ("openId", name, email, "loginMethod", role, "lastSignedIn", "createdAt", "updatedAt") VALUES (${openId}, ${name || "Admin"}, ${email}, 'local', 'admin', NOW(), NOW(), NOW())`
         );
-        // Get the inserted user ID
-        const insertRows = (insertResult as any)?.[0] || insertResult;
-        userId = (insertRows as any)?.insertId;
-        if (!userId) {
-          // Fetch by openId
-          const fetchResult = await dbConn.execute(sql`SELECT id FROM users WHERE openId = ${openId} LIMIT 1`);
-          const fetchRows = (fetchResult as any)?.[0] || fetchResult;
-          userId = Array.isArray(fetchRows) && fetchRows.length > 0 ? fetchRows[0].id : 0;
-        }
+        // Fetch the inserted user ID
+        const fetchResult = await dbConn.execute(sql`SELECT id FROM users WHERE "openId" = ${openId} LIMIT 1`);
+        const fetchRows = Array.isArray(fetchResult) ? fetchResult : (fetchResult as any)?.rows || [];
+        userId = fetchRows.length > 0 ? fetchRows[0].id : 0;
       }
 
       if (!userId) {
@@ -221,7 +216,7 @@ export function registerLocalAuthRoutes(app: Express) {
 
       // Insert or update credentials
       await dbConn.execute(
-        sql`INSERT INTO local_credentials (user_id, email, password_hash) VALUES (${userId}, ${email}, ${passwordHash}) ON DUPLICATE KEY UPDATE password_hash = ${passwordHash}`
+        sql`INSERT INTO local_credentials (user_id, email, password_hash) VALUES (${userId}, ${email}, ${passwordHash}) ON CONFLICT (email) DO UPDATE SET password_hash = ${passwordHash}`
       );
 
       // Check JWT_SECRET is configured
@@ -278,7 +273,7 @@ export function registerLocalAuthRoutes(app: Express) {
         return;
       }
 
-      await dbConn.execute(sql`UPDATE users SET lastSignedIn = NOW() WHERE id = ${user.id}`);
+      await dbConn.execute(sql`UPDATE users SET "lastSignedIn" = NOW() WHERE id = ${user.id}`);
 
       const sessionToken = await sdk.createSessionToken(user.openId, {
         name: user.name || "User",
