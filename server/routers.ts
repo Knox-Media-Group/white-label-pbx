@@ -8,6 +8,22 @@ import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
 import * as signalwire from "./signalwire";
+import { scrypt, randomBytes, timingSafeEqual } from "crypto";
+import { promisify } from "util";
+
+const scryptAsync = promisify(scrypt);
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${salt}:${buf.toString("hex")}`;
+}
+
+async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const [salt, key] = hash.split(":");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return timingSafeEqual(buf, Buffer.from(key, "hex"));
+}
 
 // Admin-only procedure
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -35,6 +51,98 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    portalLogin: publicProcedure
+      .input(z.object({
+        username: z.string().min(1),
+        password: z.string().min(1),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const credential = await db.getLocalCredentialByUsername(input.username);
+        if (!credential || !credential.isActive) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid username or password' });
+        }
+        const valid = await verifyPassword(input.password, credential.passwordHash);
+        if (!valid) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid username or password' });
+        }
+        const customer = await db.getCustomerById(credential.customerId);
+        if (!customer || customer.status !== 'active') {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Customer account is not active' });
+        }
+        await db.updateLocalCredentialLoginTime(credential.id);
+        // Create a portal session by upserting a user record linked to the customer
+        const portalOpenId = `portal_${credential.customerId}_${credential.id}`;
+        await db.upsertUser({
+          openId: portalOpenId,
+          name: customer.name,
+          email: customer.email,
+          role: 'user',
+          customerId: credential.customerId,
+          lastSignedIn: new Date(),
+        });
+        const { sdk } = await import('./_core/sdk');
+        const sessionToken = await sdk.createSessionToken(portalOpenId, {
+          name: customer.name,
+          expiresInMs: 1000 * 60 * 60 * 24, // 24 hours
+        });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: 1000 * 60 * 60 * 24 });
+        return { success: true, customerId: credential.customerId };
+      }),
+  }),
+
+  // ============ LOCAL CREDENTIALS MANAGEMENT ============
+  localCredentials: router({
+    list: adminProcedure
+      .input(z.object({ customerId: z.number() }))
+      .query(async ({ input }) => {
+        const creds = await db.getLocalCredentialsByCustomer(input.customerId);
+        // Strip passwordHash from response
+        return creds.map(({ passwordHash, ...rest }) => rest);
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        customerId: z.number(),
+        username: z.string().min(1),
+        password: z.string().min(8),
+      }))
+      .mutation(async ({ input }) => {
+        const existing = await db.getLocalCredentialByUsername(input.username);
+        if (existing) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'Username already exists' });
+        }
+        const passwordHash = await hashPassword(input.password);
+        const id = await db.createLocalCredential({
+          customerId: input.customerId,
+          username: input.username,
+          passwordHash,
+        });
+        return { id };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        password: z.string().min(8).optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { id, password, ...data } = input;
+        const updateData: Record<string, unknown> = { ...data };
+        if (password) {
+          updateData.passwordHash = await hashPassword(password);
+        }
+        await db.updateLocalCredential(id, updateData);
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await db.deleteLocalCredential(input.id);
+        return { success: true };
+      }),
   }),
 
   // ============ ADMIN: CUSTOMER MANAGEMENT ============

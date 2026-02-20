@@ -2,7 +2,7 @@ import { defineConfig } from "drizzle-kit";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  throw new Error("DATABASE_URL is required to run drizzle commands");
+  console.warn("WARNING: DATABASE_URL is not set. Migrations requiring a DB connection will fail.");
 }
 
 export default defineConfig({
@@ -10,6 +10,6 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "mysql",
   dbCredentials: {
-    url: connectionString,
+    url: connectionString || "",
   },
 });

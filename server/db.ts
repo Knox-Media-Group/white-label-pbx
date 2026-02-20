@@ -12,7 +12,8 @@ import {
   notifications, InsertNotification, Notification,
   notificationSettings, InsertNotificationSettings, NotificationSettings,
   llmCallFlows, InsertLlmCallFlow, LlmCallFlow,
-  retentionPolicies, InsertRetentionPolicy, RetentionPolicy
+  retentionPolicies, InsertRetentionPolicy, RetentionPolicy,
+  localCredentials, InsertLocalCredential, LocalCredential
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -487,4 +488,43 @@ export async function incrementUsageStats(customerId: number, increments: {
       totalMinutes: increments.totalMinutes || 0,
     });
   }
+}
+
+// ============ LOCAL CREDENTIALS OPERATIONS ============
+export async function createLocalCredential(credential: InsertLocalCredential): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(localCredentials).values(credential);
+  return result[0].insertId;
+}
+
+export async function getLocalCredentialByUsername(username: string): Promise<LocalCredential | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(localCredentials).where(eq(localCredentials.username, username)).limit(1);
+  return result[0];
+}
+
+export async function getLocalCredentialsByCustomer(customerId: number): Promise<LocalCredential[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(localCredentials).where(eq(localCredentials.customerId, customerId));
+}
+
+export async function updateLocalCredential(id: number, data: Partial<InsertLocalCredential>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(localCredentials).set(data).where(eq(localCredentials.id, id));
+}
+
+export async function updateLocalCredentialLoginTime(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(localCredentials).set({ lastLoginAt: new Date() }).where(eq(localCredentials.id, id));
+}
+
+export async function deleteLocalCredential(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(localCredentials).where(eq(localCredentials.id, id));
 }

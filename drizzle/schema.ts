@@ -275,3 +275,20 @@ export const retentionPolicies = mysqlTable("retentionPolicies", {
 
 export type RetentionPolicy = typeof retentionPolicies.$inferSelect;
 export type InsertRetentionPolicy = typeof retentionPolicies.$inferInsert;
+
+/**
+ * Local Credentials - username/password authentication for customer portal access
+ */
+export const localCredentials = mysqlTable("local_credentials", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull(),
+  username: varchar("username", { length: 64 }).notNull().unique(),
+  passwordHash: text("passwordHash").notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  lastLoginAt: timestamp("lastLoginAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type LocalCredential = typeof localCredentials.$inferSelect;
+export type InsertLocalCredential = typeof localCredentials.$inferInsert;
