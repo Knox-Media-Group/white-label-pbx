@@ -1,4 +1,4 @@
-# White Label PBX Manager - Project TODO
+# KLT Connect - Project TODO
 
 ## Core Architecture
 - [x] Multi-tenant database schema with customer isolation
@@ -86,7 +86,7 @@
 - [x] Rule activation/deactivation
 - [x] AI-powered IVR with speech recognition
 
-## White-Label Branding
+## Custom Branding
 - [x] Logo upload and storage in S3
 - [x] Primary color customization
 - [x] Company name customization

@@ -68,7 +68,7 @@ export default function CustomerBranding() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Palette className="h-5 w-5" />
-              White-Label Branding
+              Custom Branding
             </CardTitle>
             <CardDescription>
               Customize the appearance of your customer portal

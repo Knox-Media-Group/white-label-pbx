@@ -298,7 +298,7 @@ export default function AdminCustomerDetail() {
           <TabsContent value="branding">
             <Card>
               <CardHeader>
-                <CardTitle>White-Label Branding</CardTitle>
+                <CardTitle>Custom Branding</CardTitle>
                 <CardDescription>Customize the customer portal appearance</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

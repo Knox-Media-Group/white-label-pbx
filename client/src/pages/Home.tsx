@@ -44,7 +44,7 @@ export default function Home() {
     },
     {
       icon: Shield,
-      title: "White-Label Branding",
+      title: "Custom Branding",
       description: "Customize logo, colors, and company name for each customer's portal experience."
     },
     {
@@ -61,7 +61,7 @@ export default function Home() {
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
             <Phone className="h-6 w-6 text-indigo-600" />
-            <span className="text-xl font-semibold text-slate-900">White Label PBX</span>
+            <span className="text-xl font-semibold text-slate-900">KLT Connect</span>
           </div>
           <div className="flex items-center gap-4">
             {loading ? (
@@ -115,7 +115,7 @@ export default function Home() {
         <div className="container">
           <div className="text-center mb-16">
             <h2 className="text-3xl font-bold text-slate-900">Powerful Features</h2>
-            <p className="mt-4 text-lg text-slate-600">Everything you need to manage a white-label PBX service</p>
+            <p className="mt-4 text-lg text-slate-600">Everything you need to manage your cloud PBX service</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
             {features.map((feature, index) => (
@@ -165,7 +165,7 @@ export default function Home() {
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <Phone className="h-5 w-5 text-indigo-400" />
-              <span className="text-white font-semibold">White Label PBX Manager</span>
+              <span className="text-white font-semibold">KLT Connect</span>
             </div>
             <p className="text-sm">Powered by Telnyx</p>
           </div>

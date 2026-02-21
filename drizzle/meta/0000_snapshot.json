@@ -272,20 +272,20 @@
           "notNull": true,
           "default": "'pending'"
         },
-        "signalwireSubprojectSid": {
-          "name": "signalwireSubprojectSid",
+        "telnyxApiKey": {
+          "name": "telnyxApiKey",
           "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false
         },
-        "signalwireApiToken": {
-          "name": "signalwireApiToken",
+        "telnyxApiToken": {
+          "name": "telnyxApiToken",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "signalwireSpaceUrl": {
-          "name": "signalwireSpaceUrl",
+        "telnyxConnectionId": {
+          "name": "telnyxConnectionId",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": false
@@ -716,8 +716,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "signalwirePhoneNumberSid": {
-          "name": "signalwirePhoneNumberSid",
+        "telnyxPhoneNumberId": {
+          "name": "telnyxPhoneNumberId",
           "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false
@@ -995,8 +995,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "signalwireEndpointId": {
-          "name": "signalwireEndpointId",
+        "telnyxEndpointId": {
+          "name": "telnyxEndpointId",
           "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false
