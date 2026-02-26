@@ -20,13 +20,14 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
+let _pgClient: ReturnType<typeof postgres> | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      const client = postgres(process.env.DATABASE_URL);
-      _db = drizzle(client);
+      _pgClient = postgres(process.env.DATABASE_URL);
+      _db = drizzle(_pgClient);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -37,6 +38,7 @@ export async function getDb() {
 
 // ============ AUTO-BOOTSTRAP ============
 // Creates all enums and tables on first run so no manual db:push is needed.
+// Uses the raw postgres.js client's .unsafe() for PL/pgSQL DO blocks.
 let _bootstrapPromise: Promise<void> | null = null;
 
 export function bootstrapDatabase(): Promise<void> {
@@ -47,20 +49,20 @@ export function bootstrapDatabase(): Promise<void> {
 }
 
 async function _bootstrapImpl(): Promise<void> {
-  const dbConn = await getDb();
-  if (!dbConn) {
+  // Ensure connection is established
+  await getDb();
+  if (!_pgClient) {
     console.warn("[Database] Cannot bootstrap — no database connection");
     return;
   }
 
   try {
     // Quick check: if users table already exists, skip bootstrap
-    const check = await dbConn.execute(sql`
+    const check = await _pgClient`
       SELECT 1 FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name = 'users'
-    `);
-    const rows = Array.isArray(check) ? check : [];
-    if (rows.length > 0) {
+    `;
+    if (check.length > 0) {
       console.log("[Database] Tables already exist, skipping bootstrap");
       return;
     }
@@ -70,9 +72,10 @@ async function _bootstrapImpl(): Promise<void> {
 
   console.log("[Database] First run — creating all tables...");
 
-  // Each statement is executed individually for clear error reporting
+  // Each statement is executed individually for clear error reporting.
+  // Enums use .unsafe() because DO $$ blocks need raw execution.
   const statements: string[] = [
-    // ---- ENUMS ----
+    // ---- ENUMS (via unsafe for DO $$ support) ----
     `DO $$ BEGIN CREATE TYPE user_role AS ENUM ('user', 'admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `DO $$ BEGIN CREATE TYPE customer_status AS ENUM ('active', 'suspended', 'pending', 'cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
     `DO $$ BEGIN CREATE TYPE telephony_provider AS ENUM ('signalwire', 'telnyx'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
@@ -385,12 +388,13 @@ async function _bootstrapImpl(): Promise<void> {
   ];
 
   let created = 0;
-  for (const stmt of statements) {
+  for (let i = 0; i < statements.length; i++) {
     try {
-      await dbConn.execute(sql`${sql.raw(stmt)}`);
+      // Use .unsafe() for raw SQL — needed for DO $$ blocks and enum types
+      await _pgClient!.unsafe(statements[i]);
       created++;
     } catch (error: any) {
-      console.error(`[Database] Bootstrap statement ${created + 1} failed:`, error?.message || error);
+      console.error(`[Database] Bootstrap statement ${i + 1}/${statements.length} failed:`, error?.message || error);
     }
   }
 
