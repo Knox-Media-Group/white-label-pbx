@@ -5,6 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerLocalAuthRoutes } from "./local-auth";
+import { bootstrapDatabase } from "../db";
 import { appRouter } from "../routers";
 import { webhookRouter } from "../webhooks";
 import { telnyxWebhookRouter } from "../telnyx-webhooks";
@@ -42,6 +43,9 @@ async function startServer() {
 
   // Security headers
   app.use(securityHeaders);
+
+  // Auto-create all PostgreSQL tables on first run
+  await bootstrapDatabase();
 
   // Health check endpoint (no rate limit, no auth)
   app.get("/api/health", (req, res) => {

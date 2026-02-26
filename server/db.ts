@@ -35,6 +35,368 @@ export async function getDb() {
   return _db;
 }
 
+// ============ AUTO-BOOTSTRAP ============
+// Creates all enums and tables on first run so no manual db:push is needed.
+let _bootstrapPromise: Promise<void> | null = null;
+
+export function bootstrapDatabase(): Promise<void> {
+  if (!_bootstrapPromise) {
+    _bootstrapPromise = _bootstrapImpl();
+  }
+  return _bootstrapPromise;
+}
+
+async function _bootstrapImpl(): Promise<void> {
+  const dbConn = await getDb();
+  if (!dbConn) {
+    console.warn("[Database] Cannot bootstrap — no database connection");
+    return;
+  }
+
+  try {
+    // Quick check: if users table already exists, skip bootstrap
+    const check = await dbConn.execute(sql`
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'users'
+    `);
+    const rows = Array.isArray(check) ? check : [];
+    if (rows.length > 0) {
+      console.log("[Database] Tables already exist, skipping bootstrap");
+      return;
+    }
+  } catch {
+    // If even the check fails, continue with bootstrap attempt
+  }
+
+  console.log("[Database] First run — creating all tables...");
+
+  // Each statement is executed individually for clear error reporting
+  const statements: string[] = [
+    // ---- ENUMS ----
+    `DO $$ BEGIN CREATE TYPE user_role AS ENUM ('user', 'admin'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE customer_status AS ENUM ('active', 'suspended', 'pending', 'cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE telephony_provider AS ENUM ('signalwire', 'telnyx'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE endpoint_status AS ENUM ('active', 'inactive', 'provisioning'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE call_handler AS ENUM ('laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'video_room'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE http_method AS ENUM ('GET', 'POST'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE phone_call_handler AS ENUM ('laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'sip_endpoint', 'ring_group', 'retell_agent'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE phone_status AS ENUM ('active', 'inactive', 'porting'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE ring_strategy AS ENUM ('simultaneous', 'sequential', 'round_robin', 'random'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE failover_action AS ENUM ('voicemail', 'forward', 'hangup'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE active_inactive AS ENUM ('active', 'inactive'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE match_type AS ENUM ('all', 'caller_id', 'time_based', 'did'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE destination_type AS ENUM ('endpoint', 'ring_group', 'external', 'voicemail', 'ai_agent'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE call_direction AS ENUM ('inbound', 'outbound'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE recording_status AS ENUM ('processing', 'ready', 'failed', 'deleted'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE notification_type AS ENUM ('missed_call', 'voicemail', 'high_volume', 'system', 'recording_ready'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE retell_agent_status AS ENUM ('active', 'inactive', 'configuring'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE transport AS ENUM ('UDP', 'TCP', 'TLS'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE voip_phone_status AS ENUM ('online', 'offline', 'provisioning', 'error'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+    `DO $$ BEGIN CREATE TYPE port_order_status AS ENUM ('draft', 'submitted', 'in_progress', 'completed', 'failed', 'cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+
+    // ---- TABLES ----
+    `CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      "openId" VARCHAR(64) NOT NULL UNIQUE,
+      name TEXT,
+      email VARCHAR(320),
+      "passwordHash" TEXT,
+      "loginMethod" VARCHAR(64),
+      role user_role NOT NULL DEFAULT 'user',
+      "customerId" INTEGER,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "lastSignedIn" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      "companyName" VARCHAR(255),
+      email VARCHAR(320) NOT NULL,
+      phone VARCHAR(32),
+      status customer_status NOT NULL DEFAULT 'pending',
+      "signalwireSubprojectSid" VARCHAR(64),
+      "signalwireApiToken" TEXT,
+      "signalwireSpaceUrl" VARCHAR(255),
+      "telnyxConnectionId" VARCHAR(64),
+      "telnyxCredentialConnectionId" VARCHAR(64),
+      "telnyxTexmlAppId" VARCHAR(64),
+      "telnyxOutboundProfileId" VARCHAR(64),
+      "telnyxSipDomain" VARCHAR(255),
+      "retellAgentId" VARCHAR(64),
+      "retellLlmId" VARCHAR(64),
+      "retellGreeting" TEXT,
+      "retellEnabled" BOOLEAN DEFAULT false,
+      "telephonyProvider" telephony_provider DEFAULT 'telnyx',
+      "brandingLogo" TEXT,
+      "brandingPrimaryColor" VARCHAR(7) DEFAULT '#6366f1',
+      "brandingCompanyName" VARCHAR(255),
+      "portalUsername" VARCHAR(64) UNIQUE,
+      "portalPasswordHash" TEXT,
+      notes TEXT,
+      "smsSummaryEnabled" BOOLEAN DEFAULT true,
+      "notificationPhone" VARCHAR(32),
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "sipEndpoints" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "signalwireEndpointId" VARCHAR(64),
+      "telnyxCredentialConnectionId" VARCHAR(64),
+      "telnyxSipUsername" VARCHAR(128),
+      username VARCHAR(64) NOT NULL,
+      password TEXT,
+      "callerId" VARCHAR(64),
+      "sendAs" VARCHAR(32),
+      "displayName" VARCHAR(128),
+      "extensionNumber" VARCHAR(16),
+      "phoneModel" VARCHAR(128),
+      "macAddress" VARCHAR(17),
+      status endpoint_status NOT NULL DEFAULT 'provisioning',
+      "callHandler" call_handler DEFAULT 'laml_webhooks',
+      "callRequestUrl" TEXT,
+      "callRequestMethod" http_method DEFAULT 'POST',
+      "callRelayContext" VARCHAR(64),
+      "callAiAgentId" VARCHAR(64),
+      provider telephony_provider DEFAULT 'telnyx',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "phoneNumbers" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "signalwirePhoneNumberSid" VARCHAR(64),
+      "telnyxPhoneNumberId" VARCHAR(64),
+      "telnyxConnectionId" VARCHAR(64),
+      "retellPhoneNumberId" VARCHAR(64),
+      "retellAgentId" VARCHAR(64),
+      "phoneNumber" VARCHAR(32) NOT NULL,
+      "friendlyName" VARCHAR(128),
+      "voiceEnabled" BOOLEAN DEFAULT true,
+      "smsEnabled" BOOLEAN DEFAULT false,
+      "faxEnabled" BOOLEAN DEFAULT false,
+      "assignedToEndpointId" INTEGER,
+      "assignedToRingGroupId" INTEGER,
+      "callHandler" phone_call_handler DEFAULT 'laml_webhooks',
+      "callRequestUrl" TEXT,
+      "callRelayContext" VARCHAR(64),
+      status phone_status NOT NULL DEFAULT 'active',
+      "portOrderId" VARCHAR(64),
+      "portedFrom" VARCHAR(64),
+      "portCompletedAt" TIMESTAMP,
+      provider telephony_provider DEFAULT 'telnyx',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "ringGroups" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      name VARCHAR(128) NOT NULL,
+      description TEXT,
+      "extensionNumber" VARCHAR(16),
+      strategy ring_strategy NOT NULL DEFAULT 'simultaneous',
+      "ringTimeout" INTEGER DEFAULT 30,
+      "memberEndpointIds" JSONB,
+      "failoverAction" failover_action DEFAULT 'voicemail',
+      "failoverDestination" VARCHAR(128),
+      status active_inactive NOT NULL DEFAULT 'active',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "callRoutes" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      name VARCHAR(128) NOT NULL,
+      description TEXT,
+      priority INTEGER DEFAULT 0,
+      "matchType" match_type NOT NULL DEFAULT 'all',
+      "matchPattern" VARCHAR(128),
+      "timeStart" VARCHAR(8),
+      "timeEnd" VARCHAR(8),
+      "daysOfWeek" JSONB,
+      "destinationType" destination_type NOT NULL DEFAULT 'endpoint',
+      "destinationId" INTEGER,
+      "destinationExternal" VARCHAR(128),
+      "callRouteStatus" active_inactive NOT NULL DEFAULT 'active',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "usageStats" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "periodStart" TIMESTAMP NOT NULL,
+      "periodEnd" TIMESTAMP NOT NULL,
+      "totalCalls" INTEGER DEFAULT 0,
+      "inboundCalls" INTEGER DEFAULT 0,
+      "outboundCalls" INTEGER DEFAULT 0,
+      "totalMinutes" INTEGER DEFAULT 0,
+      "missedCalls" INTEGER DEFAULT 0,
+      "activeEndpoints" INTEGER DEFAULT 0,
+      "activePhoneNumbers" INTEGER DEFAULT 0,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "callRecordings" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "callSid" VARCHAR(64),
+      direction call_direction NOT NULL,
+      "fromNumber" VARCHAR(32),
+      "toNumber" VARCHAR(32),
+      duration INTEGER,
+      "recordingUrl" TEXT,
+      "recordingKey" VARCHAR(255),
+      transcription TEXT,
+      summary TEXT,
+      "recordingStatus" recording_status NOT NULL DEFAULT 'processing',
+      "retentionDays" INTEGER DEFAULT 90,
+      "expiresAt" TIMESTAMP,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "userId" INTEGER,
+      type notification_type NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      message TEXT,
+      metadata JSONB,
+      "isRead" BOOLEAN DEFAULT false,
+      "emailSent" BOOLEAN DEFAULT false,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "notificationSettings" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL UNIQUE,
+      "missedCallEmail" BOOLEAN DEFAULT true,
+      "missedCallInApp" BOOLEAN DEFAULT true,
+      "voicemailEmail" BOOLEAN DEFAULT true,
+      "voicemailInApp" BOOLEAN DEFAULT true,
+      "highVolumeEmail" BOOLEAN DEFAULT false,
+      "highVolumeInApp" BOOLEAN DEFAULT true,
+      "highVolumeThreshold" INTEGER DEFAULT 100,
+      "recordingReadyEmail" BOOLEAN DEFAULT false,
+      "recordingReadyInApp" BOOLEAN DEFAULT true,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "llmCallFlows" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      name VARCHAR(128) NOT NULL,
+      "naturalLanguageConfig" TEXT,
+      "generatedLaml" TEXT,
+      "isActive" BOOLEAN DEFAULT false,
+      "lastGeneratedAt" TIMESTAMP,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "retentionPolicies" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL UNIQUE,
+      "defaultRetentionDays" INTEGER DEFAULT 90,
+      "autoDeleteEnabled" BOOLEAN DEFAULT true,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "retellAgents" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "retellAgentId" VARCHAR(64) NOT NULL,
+      "retellLlmId" VARCHAR(64),
+      name VARCHAR(128) NOT NULL,
+      description TEXT,
+      greeting TEXT,
+      "voiceId" VARCHAR(64),
+      language VARCHAR(16) DEFAULT 'en-US',
+      departments JSONB,
+      "enablePostCallAnalysis" BOOLEAN DEFAULT true,
+      "enableVoicemailDetection" BOOLEAN DEFAULT true,
+      "voicemailMessage" TEXT,
+      "maxCallDurationMs" INTEGER DEFAULT 600000,
+      "retellAgentStatus" retell_agent_status NOT NULL DEFAULT 'configuring',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "voipPhones" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "sipEndpointId" INTEGER,
+      brand VARCHAR(64),
+      model VARCHAR(64),
+      "macAddress" VARCHAR(17),
+      "ipAddress" VARCHAR(45),
+      "firmwareVersion" VARCHAR(32),
+      "sipServer" VARCHAR(255),
+      "sipUsername" VARCHAR(64),
+      "sipPort" INTEGER DEFAULT 5060,
+      transport transport DEFAULT 'UDP',
+      label VARCHAR(128),
+      location VARCHAR(128),
+      "provisioningUrl" TEXT,
+      "lastRegisteredAt" TIMESTAMP,
+      "voipPhoneStatus" voip_phone_status NOT NULL DEFAULT 'provisioning',
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS "portOrders" (
+      id SERIAL PRIMARY KEY,
+      "customerId" INTEGER NOT NULL,
+      "telnyxPortOrderId" VARCHAR(64),
+      "phoneNumbers" JSONB,
+      "currentCarrier" VARCHAR(128),
+      "accountNumber" VARCHAR(64),
+      "authorizedName" VARCHAR(128),
+      "streetAddress" VARCHAR(255),
+      city VARCHAR(128),
+      state VARCHAR(64),
+      "postalCode" VARCHAR(16),
+      country VARCHAR(2) DEFAULT 'US',
+      "portOrderStatus" port_order_status NOT NULL DEFAULT 'draft',
+      "focDate" TIMESTAMP,
+      "completedAt" TIMESTAMP,
+      "errorMessage" TEXT,
+      "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+
+    // local_credentials for password auth
+    `CREATE TABLE IF NOT EXISTS local_credentials (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      email VARCHAR(320) NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+  ];
+
+  let created = 0;
+  for (const stmt of statements) {
+    try {
+      await dbConn.execute(sql`${sql.raw(stmt)}`);
+      created++;
+    } catch (error: any) {
+      console.error(`[Database] Bootstrap statement ${created + 1} failed:`, error?.message || error);
+    }
+  }
+
+  console.log(`[Database] Bootstrap complete — ${created}/${statements.length} statements executed`);
+}
+
 // ============ USER OPERATIONS ============
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
