@@ -5,59 +5,48 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Phone, Plus, Trash2, Settings, Loader2, Copy, Eye, EyeOff } from "lucide-react";
+import { Phone, Plus, Trash2, Loader2, Copy, Eye, EyeOff } from "lucide-react";
 
 export default function AdminSipEndpoints() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [newEndpoint, setNewEndpoint] = useState({
-    username: "",
+    connection_name: "",
+    user_name: "",
     password: "",
-    callerId: "",
-    callerIdName: "",
-    callHandler: "laml_webhooks" as const,
-    callRequestUrl: "",
   });
 
-  const { data: endpoints, isLoading, refetch } = trpc.signalwireApi.listSipEndpoints.useQuery();
-  const { data: signalwireStatus } = trpc.signalwireApi.status.useQuery();
+  const { data: telnyxStatus } = trpc.telnyxApi.status.useQuery();
+  const { data: connections, isLoading, refetch } = trpc.telnyxApi.listCredentialConnections.useQuery();
 
-  const createEndpoint = trpc.signalwireApi.createSipEndpoint.useMutation({
+  const createConnection = trpc.telnyxApi.createCredentialConnection.useMutation({
     onSuccess: () => {
-      toast.success("SIP endpoint created successfully!");
+      toast.success("SIP credential connection created successfully!");
       setIsCreateDialogOpen(false);
-      setNewEndpoint({
-        username: "",
-        password: "",
-        callerId: "",
-        callerIdName: "",
-        callHandler: "laml_webhooks",
-        callRequestUrl: "",
-      });
+      setNewEndpoint({ connection_name: "", user_name: "", password: "" });
       refetch();
     },
     onError: (error) => {
-      toast.error(`Failed to create endpoint: ${error.message}`);
+      toast.error(`Failed to create connection: ${error.message}`);
     },
   });
 
-  const deleteEndpoint = trpc.signalwireApi.deleteSipEndpoint.useMutation({
+  const deleteConnection = trpc.telnyxApi.deleteCredentialConnection.useMutation({
     onSuccess: () => {
-      toast.success("SIP endpoint deleted successfully!");
+      toast.success("Credential connection deleted successfully!");
       refetch();
     },
     onError: (error) => {
-      toast.error(`Failed to delete endpoint: ${error.message}`);
+      toast.error(`Failed to delete connection: ${error.message}`);
     },
   });
 
   const handleCreate = () => {
-    if (!newEndpoint.username || !newEndpoint.password) {
+    if (!newEndpoint.user_name || !newEndpoint.password) {
       toast.error("Username and password are required");
       return;
     }
@@ -65,12 +54,16 @@ export default function AdminSipEndpoints() {
       toast.error("Password must be at least 8 characters");
       return;
     }
-    createEndpoint.mutate(newEndpoint);
+    createConnection.mutate({
+      connection_name: newEndpoint.connection_name || newEndpoint.user_name,
+      user_name: newEndpoint.user_name,
+      password: newEndpoint.password,
+    });
   };
 
   const handleDelete = (id: string) => {
-    if (confirm("Are you sure you want to delete this SIP endpoint? This action cannot be undone.")) {
-      deleteEndpoint.mutate({ id });
+    if (confirm("Are you sure you want to delete this credential connection? This action cannot be undone.")) {
+      deleteConnection.mutate({ id });
     }
   };
 
@@ -98,17 +91,17 @@ export default function AdminSipEndpoints() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">SIP Endpoints</h1>
-            <p className="text-muted-foreground">Manage SignalWire SIP endpoints for your customers</p>
+            <p className="text-muted-foreground">Manage Telnyx credential connections for your customers</p>
           </div>
           <div className="flex items-center gap-4">
-            {signalwireStatus && (
-              <Badge variant={signalwireStatus.configured ? "default" : "destructive"}>
-                SignalWire: {signalwireStatus.configured ? "Connected" : "Not Configured"}
+            {telnyxStatus && (
+              <Badge variant={telnyxStatus.configured ? "default" : "destructive"}>
+                Telnyx: {telnyxStatus.configured ? "Connected" : "Not Configured"}
               </Badge>
             )}
             <Button onClick={() => setIsCreateDialogOpen(true)}>
               <Plus className="h-4 w-4 mr-2" />
-              Create Endpoint
+              Create Connection
             </Button>
           </div>
         </div>
@@ -117,10 +110,10 @@ export default function AdminSipEndpoints() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Phone className="h-5 w-5" />
-              SignalWire SIP Endpoints
+              Telnyx Credential Connections
             </CardTitle>
             <CardDescription>
-              SIP endpoints registered in your SignalWire account
+              SIP credential connections registered in your Telnyx account
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -128,58 +121,55 @@ export default function AdminSipEndpoints() {
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : endpoints?.data?.length > 0 ? (
+            ) : connections?.data?.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Connection Name</TableHead>
                     <TableHead>Username</TableHead>
-                    <TableHead>Caller ID</TableHead>
-                    <TableHead>Call Handler</TableHead>
                     <TableHead>SIP URI</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {endpoints.data.map((endpoint: any) => (
-                    <TableRow key={endpoint.id}>
-                      <TableCell className="font-mono font-medium">
-                        {endpoint.username}
+                  {connections.data.map((conn: any) => (
+                    <TableRow key={conn.id}>
+                      <TableCell className="font-medium">
+                        {conn.connection_name || conn.user_name}
                       </TableCell>
-                      <TableCell>
-                        {endpoint.caller_id_name || endpoint.caller_id || "-"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{endpoint.call_handler || "laml_webhooks"}</Badge>
+                      <TableCell className="font-mono">
+                        {conn.user_name}
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         <div className="flex items-center gap-2">
-                          <span className="truncate max-w-[200px]">
-                            {endpoint.username}@{signalwireStatus?.spaceUrl}
+                          <span className="truncate max-w-[250px]">
+                            {conn.sip_uri || `sip:${conn.user_name}@sip.telnyx.com`}
                           </span>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="h-6 w-6"
-                            onClick={() => copyToClipboard(`${endpoint.username}@${signalwireStatus?.spaceUrl}`)}
+                            onClick={() => copyToClipboard(conn.sip_uri || `sip:${conn.user_name}@sip.telnyx.com`)}
                           >
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
                       </TableCell>
+                      <TableCell>
+                        <Badge variant={conn.active !== false ? "default" : "outline"}>
+                          {conn.active !== false ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon">
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(endpoint.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(conn.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -188,8 +178,8 @@ export default function AdminSipEndpoints() {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <Phone className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>No SIP endpoints found</p>
-                <p className="text-sm">Create an endpoint to get started</p>
+                <p>No credential connections found</p>
+                <p className="text-sm">Create a connection to get started</p>
               </div>
             )}
           </CardContent>
@@ -199,18 +189,26 @@ export default function AdminSipEndpoints() {
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Create SIP Endpoint</DialogTitle>
+              <DialogTitle>Create Credential Connection</DialogTitle>
               <DialogDescription>
-                Create a new SIP endpoint in your SignalWire account.
+                Create a new SIP credential connection in your Telnyx account.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
+                <Label>Connection Name</Label>
+                <Input
+                  placeholder="e.g., Office Main Line"
+                  value={newEndpoint.connection_name}
+                  onChange={(e) => setNewEndpoint({ ...newEndpoint, connection_name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Username *</Label>
                 <Input
                   placeholder="e.g., extension101"
-                  value={newEndpoint.username}
-                  onChange={(e) => setNewEndpoint({ ...newEndpoint, username: e.target.value })}
+                  value={newEndpoint.user_name}
+                  onChange={(e) => setNewEndpoint({ ...newEndpoint, user_name: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
@@ -238,59 +236,16 @@ export default function AdminSipEndpoints() {
                   </Button>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Caller ID Number</Label>
-                <Input
-                  placeholder="e.g., +15551234567"
-                  value={newEndpoint.callerId}
-                  onChange={(e) => setNewEndpoint({ ...newEndpoint, callerId: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Caller ID Name</Label>
-                <Input
-                  placeholder="e.g., John Smith"
-                  value={newEndpoint.callerIdName}
-                  onChange={(e) => setNewEndpoint({ ...newEndpoint, callerIdName: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Call Handler</Label>
-                <Select
-                  value={newEndpoint.callHandler}
-                  onValueChange={(v) => setNewEndpoint({ ...newEndpoint, callHandler: v as any })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="laml_webhooks">LaML Webhooks</SelectItem>
-                    <SelectItem value="relay_context">Relay Context</SelectItem>
-                    <SelectItem value="relay_topic">Relay Topic</SelectItem>
-                    <SelectItem value="ai_agent">AI Agent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {newEndpoint.callHandler === "laml_webhooks" && (
-                <div className="space-y-2">
-                  <Label>Webhook URL</Label>
-                  <Input
-                    placeholder="https://your-server.com/api/webhooks/voice"
-                    value={newEndpoint.callRequestUrl}
-                    onChange={(e) => setNewEndpoint({ ...newEndpoint, callRequestUrl: e.target.value })}
-                  />
-                </div>
-              )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreate} disabled={createEndpoint.isPending}>
-                {createEndpoint.isPending ? (
+              <Button onClick={handleCreate} disabled={createConnection.isPending}>
+                {createConnection.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
-                Create Endpoint
+                Create Connection
               </Button>
             </DialogFooter>
           </DialogContent>

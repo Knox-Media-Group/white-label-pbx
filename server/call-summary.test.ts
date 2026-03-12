@@ -20,11 +20,11 @@ vi.mock("./db", () => ({
   updateCallRecording: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock the SignalWire module
-vi.mock("./signalwire", () => ({
+// Mock the Telnyx module
+vi.mock("./telnyx", () => ({
+  isConfigured: vi.fn().mockReturnValue(true),
   sendSms: vi.fn().mockResolvedValue({
-    sid: "SM123456",
-    status: "queued",
+    data: { id: "MSG123456" },
   }),
 }));
 

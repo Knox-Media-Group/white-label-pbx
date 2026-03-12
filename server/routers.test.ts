@@ -102,29 +102,28 @@ vi.mock("./_core/llm", () => ({
   }),
 }));
 
-// Mock SignalWire
-vi.mock("./signalwire", () => ({
+// Mock Telnyx
+vi.mock("./telnyx", () => ({
   getCredentialsSummary: vi.fn().mockReturnValue({
     configured: true,
-    projectId: "test-proj...",
-    spaceUrl: "test.signalwire.com",
+    apiKey: "KEY_test...",
+    sipConnectionId: "test-conn-id",
+    messagingProfileId: "test-msg-id",
   }),
-  getAccountInfo: vi.fn().mockResolvedValue({
-    sid: "test-sid",
-    friendly_name: "Test Account",
-    status: "active",
-  }),
-  listSipEndpoints: vi.fn().mockResolvedValue({ data: [] }),
-  createSipEndpoint: vi.fn().mockResolvedValue({ id: "sw-endpoint-1" }),
-  updateSipEndpoint: vi.fn().mockResolvedValue({ id: "sw-endpoint-1" }),
-  deleteSipEndpoint: vi.fn().mockResolvedValue({}),
-  searchAvailablePhoneNumbers: vi.fn().mockResolvedValue({ available_phone_numbers: [] }),
-  listPhoneNumbers: vi.fn().mockResolvedValue({ incoming_phone_numbers: [] }),
-  purchasePhoneNumber: vi.fn().mockResolvedValue({ sid: "PN123" }),
-  updatePhoneNumber: vi.fn().mockResolvedValue({}),
-  releasePhoneNumber: vi.fn().mockResolvedValue({}),
-  listCalls: vi.fn().mockResolvedValue({ calls: [] }),
-  listRecordings: vi.fn().mockResolvedValue({ recordings: [] }),
+  isConfigured: vi.fn().mockReturnValue(true),
+  listSipConnections: vi.fn().mockResolvedValue({ data: [] }),
+  createSipConnection: vi.fn().mockResolvedValue({ data: { id: "conn-1" } }),
+  listCredentialConnections: vi.fn().mockResolvedValue({ data: [] }),
+  createCredentialConnection: vi.fn().mockResolvedValue({ data: { id: "cred-1" } }),
+  deleteCredentialConnection: vi.fn().mockResolvedValue({}),
+  searchAvailablePhoneNumbers: vi.fn().mockResolvedValue({ data: [] }),
+  listPhoneNumbers: vi.fn().mockResolvedValue({ data: [] }),
+  purchasePhoneNumber: vi.fn().mockResolvedValue({ data: { id: "num-1" } }),
+  deletePhoneNumber: vi.fn().mockResolvedValue({}),
+  listTexmlApplications: vi.fn().mockResolvedValue({ data: [] }),
+  createTexmlApplication: vi.fn().mockResolvedValue({ data: { id: "app-1" } }),
+  listRecordings: vi.fn().mockResolvedValue({ data: [] }),
+  listOutboundVoiceProfiles: vi.fn().mockResolvedValue({ data: [] }),
 }));
 
 type CookieCall = {
@@ -384,37 +383,28 @@ describe("Recordings Router", () => {
   });
 });
 
-describe("SignalWire API Router (Admin)", () => {
-  it("should return SignalWire status", async () => {
+describe("Telnyx API Router (Admin)", () => {
+  it("should return Telnyx status", async () => {
     const { ctx } = createAdminContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.signalwireApi.status();
+    const result = await caller.telnyxApi.status();
     expect(result.configured).toBe(true);
   });
 
-  it("should get SignalWire account info", async () => {
+  it("should list Telnyx phone numbers", async () => {
     const { ctx } = createAdminContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.signalwireApi.accountInfo();
-    expect(result.sid).toBe("test-sid");
-    expect(result.status).toBe("active");
-  });
-
-  it("should list SignalWire SIP endpoints", async () => {
-    const { ctx } = createAdminContext();
-    const caller = appRouter.createCaller(ctx);
-
-    const result = await caller.signalwireApi.listSipEndpoints();
+    const result = await caller.telnyxApi.listPhoneNumbers();
     expect(result.data).toBeDefined();
   });
 
-  it("should list SignalWire phone numbers", async () => {
+  it("should list Telnyx credential connections", async () => {
     const { ctx } = createAdminContext();
     const caller = appRouter.createCaller(ctx);
 
-    const result = await caller.signalwireApi.listPhoneNumbers();
-    expect(result.incoming_phone_numbers).toBeDefined();
+    const result = await caller.telnyxApi.listCredentialConnections();
+    expect(result.data).toBeDefined();
   });
 });

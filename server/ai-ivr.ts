@@ -1,6 +1,6 @@
 /**
  * AI-Powered IVR Handler
- * Uses SignalWire's speech recognition and LLM for intelligent call routing
+ * Uses speech recognition and LLM for intelligent call routing
  */
 
 import { invokeLLM } from "./_core/llm";

@@ -6,36 +6,40 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Phone, Search, Plus, Trash2, Settings, Loader2 } from "lucide-react";
+import { Phone, Search, Plus, Trash2, Loader2 } from "lucide-react";
 
 export default function AdminPhoneNumbers() {
   const [searchAreaCode, setSearchAreaCode] = useState("");
-  const [searchContains, setSearchContains] = useState("");
+  const [searchState, setSearchState] = useState("");
   const [searchType, setSearchType] = useState<"local" | "toll_free">("local");
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isPurchaseDialogOpen, setIsPurchaseDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<string>("");
-  const [friendlyName, setFriendlyName] = useState("");
 
-  const { data: ownedNumbers, isLoading: loadingOwned, refetch: refetchOwned } = trpc.signalwireApi.listPhoneNumbers.useQuery();
-  const { data: signalwireStatus } = trpc.signalwireApi.status.useQuery();
+  const { data: telnyxStatus } = trpc.telnyxApi.status.useQuery();
+  const { data: ownedNumbers, isLoading: loadingOwned, refetch: refetchOwned } = trpc.telnyxApi.listPhoneNumbers.useQuery();
 
-  const searchNumbers = trpc.signalwireApi.searchPhoneNumbers.useQuery(
-    { areaCode: searchAreaCode || undefined, contains: searchContains || undefined, type: searchType },
+  const searchNumbers = trpc.telnyxApi.searchPhoneNumbers.useQuery(
+    {
+      country_code: "US",
+      national_destination_code: searchAreaCode || undefined,
+      administrative_area: searchState || undefined,
+      number_type: searchType,
+      limit: 20,
+    },
     { enabled: false }
   );
 
-  const purchaseNumber = trpc.signalwireApi.purchasePhoneNumber.useMutation({
+  const purchaseNumber = trpc.telnyxApi.purchasePhoneNumber.useMutation({
     onSuccess: () => {
       toast.success("Phone number purchased successfully!");
       setIsPurchaseDialogOpen(false);
       setSelectedNumber("");
-      setFriendlyName("");
       refetchOwned();
     },
     onError: (error) => {
@@ -43,7 +47,7 @@ export default function AdminPhoneNumbers() {
     },
   });
 
-  const releaseNumber = trpc.signalwireApi.releasePhoneNumber.useMutation({
+  const releaseNumber = trpc.telnyxApi.deletePhoneNumber.useMutation({
     onSuccess: () => {
       toast.success("Phone number released successfully!");
       refetchOwned();
@@ -57,12 +61,12 @@ export default function AdminPhoneNumbers() {
     setIsSearching(true);
     try {
       const result = await searchNumbers.refetch();
-      if (result.data?.available_phone_numbers) {
-        setSearchResults(result.data.available_phone_numbers);
+      if (result.data?.data) {
+        setSearchResults(result.data.data);
       } else {
         setSearchResults([]);
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to search phone numbers");
     } finally {
       setIsSearching(false);
@@ -71,12 +75,12 @@ export default function AdminPhoneNumbers() {
 
   const handlePurchase = () => {
     if (!selectedNumber) return;
-    purchaseNumber.mutate({ phoneNumber: selectedNumber, friendlyName: friendlyName || undefined });
+    purchaseNumber.mutate({ phoneNumber: selectedNumber });
   };
 
-  const handleRelease = (sid: string) => {
+  const handleRelease = (id: string) => {
     if (confirm("Are you sure you want to release this phone number? This action cannot be undone.")) {
-      releaseNumber.mutate({ sid });
+      releaseNumber.mutate({ id });
     }
   };
 
@@ -93,11 +97,11 @@ export default function AdminPhoneNumbers() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Phone Numbers</h1>
-            <p className="text-muted-foreground">Search and purchase phone numbers from SignalWire</p>
+            <p className="text-muted-foreground">Search and purchase phone numbers from Telnyx</p>
           </div>
-          {signalwireStatus && (
-            <Badge variant={signalwireStatus.configured ? "default" : "destructive"}>
-              SignalWire: {signalwireStatus.configured ? "Connected" : "Not Configured"}
+          {telnyxStatus && (
+            <Badge variant={telnyxStatus.configured ? "default" : "destructive"}>
+              Telnyx: {telnyxStatus.configured ? "Connected" : "Not Configured"}
             </Badge>
           )}
         </div>
@@ -137,11 +141,12 @@ export default function AdminPhoneNumbers() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Contains</Label>
+                <Label>State</Label>
                 <Input
-                  placeholder="e.g., 1234"
-                  value={searchContains}
-                  onChange={(e) => setSearchContains(e.target.value)}
+                  placeholder="e.g., CA"
+                  value={searchState}
+                  onChange={(e) => setSearchState(e.target.value)}
+                  maxLength={2}
                 />
               </div>
               <div className="flex items-end">
@@ -167,7 +172,7 @@ export default function AdminPhoneNumbers() {
                     >
                       <div>
                         <p className="font-mono font-medium">{formatPhoneNumber(number.phone_number)}</p>
-                        <p className="text-xs text-muted-foreground">{number.locality}, {number.region}</p>
+                        <p className="text-xs text-muted-foreground">{number.locality}, {number.region_information?.[0]?.region_name}</p>
                       </div>
                       <Plus className="h-4 w-4 text-primary" />
                     </div>
@@ -186,7 +191,7 @@ export default function AdminPhoneNumbers() {
               Your Phone Numbers
             </CardTitle>
             <CardDescription>
-              Phone numbers currently owned in your SignalWire account
+              Phone numbers currently owned in your Telnyx account
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -194,48 +199,41 @@ export default function AdminPhoneNumbers() {
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : ownedNumbers?.incoming_phone_numbers?.length > 0 ? (
+            ) : ownedNumbers?.data?.length > 0 ? (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Phone Number</TableHead>
-                    <TableHead>Friendly Name</TableHead>
-                    <TableHead>Capabilities</TableHead>
-                    <TableHead>Date Created</TableHead>
+                    <TableHead>Connection</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {ownedNumbers.incoming_phone_numbers.map((number: any) => (
-                    <TableRow key={number.sid}>
+                  {ownedNumbers.data.map((number: any) => (
+                    <TableRow key={number.id}>
                       <TableCell className="font-mono font-medium">
                         {formatPhoneNumber(number.phone_number)}
                       </TableCell>
-                      <TableCell>{number.friendly_name || "-"}</TableCell>
+                      <TableCell>{number.connection_name || "-"}</TableCell>
                       <TableCell>
-                        <div className="flex gap-1">
-                          {number.capabilities?.voice && <Badge variant="outline">Voice</Badge>}
-                          {number.capabilities?.sms && <Badge variant="outline">SMS</Badge>}
-                          {number.capabilities?.mms && <Badge variant="outline">MMS</Badge>}
-                        </div>
+                        <Badge variant={number.status === "active" ? "default" : "outline"}>
+                          {number.status || "active"}
+                        </Badge>
                       </TableCell>
                       <TableCell>
-                        {new Date(number.date_created).toLocaleDateString()}
+                        {number.created_at ? new Date(number.created_at).toLocaleDateString() : "-"}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon">
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleRelease(number.sid)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleRelease(number.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -257,20 +255,12 @@ export default function AdminPhoneNumbers() {
             <DialogHeader>
               <DialogTitle>Purchase Phone Number</DialogTitle>
               <DialogDescription>
-                You are about to purchase the following phone number from SignalWire.
+                You are about to purchase the following phone number from Telnyx.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="p-4 bg-accent rounded-lg text-center">
                 <p className="text-2xl font-mono font-bold">{formatPhoneNumber(selectedNumber)}</p>
-              </div>
-              <div className="space-y-2">
-                <Label>Friendly Name (Optional)</Label>
-                <Input
-                  placeholder="e.g., Main Office Line"
-                  value={friendlyName}
-                  onChange={(e) => setFriendlyName(e.target.value)}
-                />
               </div>
             </div>
             <DialogFooter>

@@ -25,12 +25,12 @@ export default function Home() {
     {
       icon: Users,
       title: "Multi-Tenant Architecture",
-      description: "Manage 100+ customers with isolated PBX environments, each with their own SignalWire subproject."
+      description: "Manage 100+ customers with isolated PBX environments, each with their own Telnyx connection."
     },
     {
       icon: Phone,
       title: "SIP Endpoint Management",
-      description: "Create, configure, and manage SIP endpoints with automated provisioning via SignalWire API."
+      description: "Create, configure, and manage SIP endpoints with automated provisioning via Telnyx API."
     },
     {
       icon: Headphones,
@@ -88,8 +88,8 @@ export default function Home() {
               <span className="block text-indigo-600">Management Platform</span>
             </h1>
             <p className="mt-6 text-lg text-slate-600 leading-relaxed">
-              A comprehensive multi-tenant telephony solution powered by SignalWire. 
-              Manage hundreds of customers with isolated PBX environments, automated provisioning, 
+              A comprehensive multi-tenant telephony solution powered by Telnyx.
+              Manage hundreds of customers with isolated PBX environments, automated provisioning,
               and AI-powered call management features.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -167,7 +167,7 @@ export default function Home() {
               <Phone className="h-5 w-5 text-indigo-400" />
               <span className="text-white font-semibold">White Label PBX Manager</span>
             </div>
-            <p className="text-sm">Powered by SignalWire</p>
+            <p className="text-sm">Powered by Telnyx</p>
           </div>
         </div>
       </footer>

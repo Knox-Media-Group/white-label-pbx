@@ -7,7 +7,6 @@ import { z } from "zod";
 import * as db from "./db";
 import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
-import * as signalwire from "./signalwire";
 import * as telnyxApi from "./telnyx";
 import * as retellApi from "./retell";
 
@@ -119,9 +118,6 @@ export const appRouter = router({
         phone: z.string().optional(),
         status: z.enum(['active', 'suspended', 'pending', 'cancelled']).optional(),
         notes: z.string().optional(),
-        signalwireSubprojectSid: z.string().optional(),
-        signalwireApiToken: z.string().optional(),
-        signalwireSpaceUrl: z.string().optional(),
         // SMS Summary settings
         smsSummaryEnabled: z.boolean().optional(),
         notificationPhone: z.string().optional(),
@@ -215,7 +211,6 @@ export const appRouter = router({
         status: z.enum(['active', 'inactive', 'provisioning']).optional(),
         callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'video_room']).optional(),
         callRequestUrl: z.string().optional(),
-        signalwireEndpointId: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const { id, ...data } = input;
@@ -596,124 +591,6 @@ export const appRouter = router({
       }),
   }),
 
-  // ============ SIGNALWIRE API ============
-  signalwireApi: router({
-    // Check if SignalWire is configured
-    status: adminProcedure.query(async () => {
-      return signalwire.getCredentialsSummary();
-    }),
-    
-    // Get account info
-    accountInfo: adminProcedure.query(async () => {
-      return signalwire.getAccountInfo();
-    }),
-    
-    // List SIP endpoints from SignalWire
-    listSipEndpoints: adminProcedure.query(async () => {
-      return signalwire.listSipEndpoints();
-    }),
-    
-    // Create SIP endpoint in SignalWire
-    createSipEndpoint: adminProcedure
-      .input(z.object({
-        username: z.string().min(1),
-        password: z.string().min(8),
-        callerId: z.string().optional(),
-        callerIdName: z.string().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
-        callRequestUrl: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        return signalwire.createSipEndpoint(input);
-      }),
-    
-    // Update SIP endpoint in SignalWire
-    updateSipEndpoint: adminProcedure
-      .input(z.object({
-        id: z.string(),
-        callerId: z.string().optional(),
-        callerIdName: z.string().optional(),
-        callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
-        callRequestUrl: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        const { id, ...params } = input;
-        return signalwire.updateSipEndpoint(id, params);
-      }),
-    
-    // Delete SIP endpoint from SignalWire
-    deleteSipEndpoint: adminProcedure
-      .input(z.object({ id: z.string() }))
-      .mutation(async ({ input }) => {
-        return signalwire.deleteSipEndpoint(input.id);
-      }),
-    
-    // Search available phone numbers
-    searchPhoneNumbers: adminProcedure
-      .input(z.object({
-        areaCode: z.string().optional(),
-        contains: z.string().optional(),
-        inRegion: z.string().optional(),
-        type: z.enum(['local', 'toll_free']).optional(),
-      }))
-      .query(async ({ input }) => {
-        return signalwire.searchAvailablePhoneNumbers(input);
-      }),
-    
-    // List owned phone numbers
-    listPhoneNumbers: adminProcedure.query(async () => {
-      return signalwire.listPhoneNumbers();
-    }),
-    
-    // Purchase a phone number
-    purchasePhoneNumber: adminProcedure
-      .input(z.object({
-        phoneNumber: z.string(),
-        friendlyName: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        return signalwire.purchasePhoneNumber(input.phoneNumber, input.friendlyName);
-      }),
-    
-    // Update phone number configuration
-    updatePhoneNumber: adminProcedure
-      .input(z.object({
-        sid: z.string(),
-        friendlyName: z.string().optional(),
-        voiceUrl: z.string().optional(),
-        voiceMethod: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        const { sid, ...params } = input;
-        return signalwire.updatePhoneNumber(sid, params);
-      }),
-    
-    // Release a phone number
-    releasePhoneNumber: adminProcedure
-      .input(z.object({ sid: z.string() }))
-      .mutation(async ({ input }) => {
-        return signalwire.releasePhoneNumber(input.sid);
-      }),
-    
-    // List calls
-    listCalls: adminProcedure
-      .input(z.object({
-        from: z.string().optional(),
-        to: z.string().optional(),
-        status: z.string().optional(),
-      }).optional())
-      .query(async ({ input }) => {
-        return signalwire.listCalls(input);
-      }),
-    
-    // List recordings from SignalWire
-    listRecordings: adminProcedure
-      .input(z.object({ callSid: z.string().optional() }).optional())
-      .query(async ({ input }) => {
-        return signalwire.listRecordings(input?.callSid);
-      }),
-  }),
-
   // ============ LLM CALL FLOWS ============
   llmCallFlows: router({
     list: customerProcedure
@@ -741,7 +618,7 @@ export const appRouter = router({
           messages: [
             {
               role: 'system',
-              content: `You are an expert at creating SignalWire LaML (XML) call flows. Convert the user's natural language description into valid LaML XML. Only output the XML, no explanations.
+              content: `You are an expert at creating Telnyx TeXML (XML) call flows. Convert the user's natural language description into valid TeXML XML. Only output the XML, no explanations.
               
 Available LaML verbs:
 - <Say>: Text-to-speech
@@ -792,7 +669,7 @@ Example output:
           messages: [
             {
               role: 'system',
-              content: `You are an expert at creating SignalWire LaML (XML) call flows. Convert the user's natural language description into valid LaML XML. Only output the XML, no explanations.`
+              content: `You are an expert at creating Telnyx TeXML (XML) call flows. Convert the user's natural language description into valid TeXML XML. Only output the XML, no explanations.`
             },
             {
               role: 'user',
@@ -939,6 +816,18 @@ Example output:
       }))
       .mutation(async ({ input }) => {
         return telnyxApi.purchasePhoneNumber(input.phoneNumber, input.connectionId);
+      }),
+
+    deletePhoneNumber: adminProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.deletePhoneNumber(input.id);
+      }),
+
+    deleteCredentialConnection: adminProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input }) => {
+        return telnyxApi.deleteCredentialConnection(input.id);
       }),
 
     // TeXML Applications

@@ -1,7 +1,7 @@
 /**
  * Telnyx API Client
  * Handles SIP trunking, phone numbers, call control, and messaging
- * Replaces SignalWire as the carrier backbone
+ * Primary carrier backbone for SIP trunking and telephony
  */
 
 import axios, { AxiosInstance } from "axios";

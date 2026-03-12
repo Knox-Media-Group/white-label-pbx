@@ -7,7 +7,6 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerLocalAuthRoutes } from "./local-auth";
 import { bootstrapDatabase } from "../db";
 import { appRouter } from "../routers";
-import { webhookRouter } from "../webhooks";
 import { telnyxWebhookRouter } from "../telnyx-webhooks";
 import { retellWebhookRouter } from "../retell-webhooks";
 import { createContext } from "./context";
@@ -67,8 +66,6 @@ async function startServer() {
   app.use("/api/oauth", authLimiter);
   registerOAuthRoutes(app);
 
-  // SignalWire webhooks (legacy)
-  app.use("/api/webhooks", webhookLimiter, webhookRouter);
   // Telnyx webhooks with signature verification
   app.use("/api/webhooks/telnyx", webhookLimiter, verifyTelnyxWebhook, telnyxWebhookRouter);
   // Retell AI webhooks

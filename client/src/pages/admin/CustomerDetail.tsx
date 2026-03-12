@@ -28,9 +28,6 @@ export default function AdminCustomerDetail() {
     email: "",
     phone: "",
     status: "pending" as "active" | "suspended" | "pending" | "cancelled",
-    signalwireSubprojectSid: "",
-    signalwireApiToken: "",
-    signalwireSpaceUrl: "",
     brandingLogo: "",
     brandingPrimaryColor: "#6366f1",
     brandingCompanyName: "",
@@ -44,9 +41,6 @@ export default function AdminCustomerDetail() {
         email: customer.email || "",
         phone: customer.phone || "",
         status: customer.status,
-        signalwireSubprojectSid: customer.signalwireSubprojectSid || "",
-        signalwireApiToken: customer.signalwireApiToken || "",
-        signalwireSpaceUrl: customer.signalwireSpaceUrl || "",
         brandingLogo: customer.brandingLogo || "",
         brandingPrimaryColor: customer.brandingPrimaryColor || "#6366f1",
         brandingCompanyName: customer.brandingCompanyName || "",
@@ -153,7 +147,6 @@ export default function AdminCustomerDetail() {
         <Tabs defaultValue="general" className="space-y-4">
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="signalwire">SignalWire</TabsTrigger>
             <TabsTrigger value="branding">Branding</TabsTrigger>
           </TabsList>
 
@@ -202,7 +195,7 @@ export default function AdminCustomerDetail() {
                     <Label htmlFor="status">Status</Label>
                     <Select
                       value={formData.status}
-                      onValueChange={(value: "active" | "suspended" | "pending" | "cancelled") => 
+                      onValueChange={(value: "active" | "suspended" | "pending" | "cancelled") =>
                         setFormData({ ...formData, status: value })
                       }
                     >
@@ -216,51 +209,6 @@ export default function AdminCustomerDetail() {
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
-                  </div>
-                </div>
-                <Button onClick={handleSave} disabled={updateMutation.isPending}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {updateMutation.isPending ? "Saving..." : "Save Changes"}
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="signalwire">
-            <Card>
-              <CardHeader>
-                <CardTitle>SignalWire Integration</CardTitle>
-                <CardDescription>Configure the SignalWire subproject for this customer</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="subprojectSid">Subproject SID</Label>
-                    <Input
-                      id="subprojectSid"
-                      value={formData.signalwireSubprojectSid}
-                      onChange={(e) => setFormData({ ...formData, signalwireSubprojectSid: e.target.value })}
-                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="apiToken">API Token</Label>
-                    <Input
-                      id="apiToken"
-                      type="password"
-                      value={formData.signalwireApiToken}
-                      onChange={(e) => setFormData({ ...formData, signalwireApiToken: e.target.value })}
-                      placeholder="PT..."
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="spaceUrl">Space URL</Label>
-                    <Input
-                      id="spaceUrl"
-                      value={formData.signalwireSpaceUrl}
-                      onChange={(e) => setFormData({ ...formData, signalwireSpaceUrl: e.target.value })}
-                      placeholder="example.signalwire.com"
-                    />
                   </div>
                 </div>
                 <Button onClick={handleSave} disabled={updateMutation.isPending}>
@@ -319,9 +267,9 @@ export default function AdminCustomerDetail() {
                 {formData.brandingLogo && (
                   <div className="p-4 border rounded-lg bg-slate-50">
                     <p className="text-sm text-muted-foreground mb-2">Logo Preview:</p>
-                    <img 
-                      src={formData.brandingLogo} 
-                      alt="Logo preview" 
+                    <img
+                      src={formData.brandingLogo}
+                      alt="Logo preview"
                       className="max-h-16 object-contain"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
