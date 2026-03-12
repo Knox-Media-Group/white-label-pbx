@@ -2,7 +2,7 @@
 
 ## Core Architecture
 - [x] Multi-tenant database schema with customer isolation
-- [x] Customer table with SignalWire subproject integration
+- [x] Customer table with Telnyx resource provisioning
 - [x] SIP endpoints table with call handler configuration
 - [x] Phone numbers table with assignment tracking
 - [x] Ring groups table with member management
@@ -29,17 +29,17 @@
 - [x] Branding customization interface
 - [x] Call recordings playback interface
 
-## SignalWire Integration
-- [x] SignalWire API client setup
-- [x] Subproject creation for new customers
+## Telephony Integration (Legacy SignalWire, migrated to Telnyx)
+- [x] Carrier API client setup (now Telnyx)
+- [x] Resource provisioning for new customers
 - [x] SIP endpoint provisioning API
 - [x] Phone number search and purchase API
 - [x] Phone number assignment to endpoints
 - [x] Webhook endpoint for call events
-- [x] LaML response generation for call flows
+- [x] TeXML response generation for call flows
 
 ## SIP Endpoint Management
-- [x] Create SIP endpoint with SignalWire
+- [x] Create SIP endpoint with Telnyx
 - [x] Configure call handler (LaML, Relay, AI Agent)
 - [x] Set caller ID and display name
 - [x] Extension number assignment
@@ -47,7 +47,7 @@
 
 ## Phone Number Management
 - [x] Search available phone numbers
-- [x] Purchase phone numbers via SignalWire
+- [x] Purchase phone numbers via Telnyx
 - [x] Assign to SIP endpoint or ring group
 - [x] Configure voice/SMS/fax capabilities
 - [x] Release phone numbers
@@ -106,7 +106,7 @@
 - [x] Fix AI call handling not transferring calls when caller asks for sales/departments
 
 ## SMS Call Summary Feature
-- [x] Add SMS sending function to SignalWire API client
+- [x] Add SMS sending function to Telnyx API client
 - [x] Create LLM-powered call summary generator
 - [x] Integrate SMS summary into call completion webhook
 - [x] Add customer settings for enabling/disabling SMS summaries
@@ -114,9 +114,9 @@
 
 ## Bug Fixes - AI Agent Transfer
 - [x] Fix AI Agent not transferring calls when caller asks for sales/departments
-- [x] Investigate SignalWire Call Flow Builder AI Agent configuration (SWAIG is read-only)
-- [x] Create webhook endpoint for AI Agent SWAIG transfer function
-- [x] Return proper SWML with transfer action from webhook
+- [x] Retell AI agent configuration for department transfers
+- [x] Create webhook endpoint for AI Agent transfer function
+- [x] Return proper TeXML with transfer action from webhook
 - [x] Provide user with AI Agent configuration instructions
 
 ## Telnyx Integration (Primary Carrier)

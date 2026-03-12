@@ -37,8 +37,13 @@ export default function CustomerCallRoutes() {
   
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+  const [editRoute, setEditRoute] = useState<{
+    id: number; name: string; priority: number;
+    destinationType: DestinationType; matchPattern: string; status: string;
+  } | null>(null);
   const [newRoute, setNewRoute] = useState({
     name: "",
     pattern: "",
@@ -61,6 +66,16 @@ export default function CustomerCallRoutes() {
     },
   });
   
+  const updateMutation = trpc.callRoutes.update.useMutation({
+    onSuccess: () => {
+      toast.success("Call route updated");
+      setIsEditOpen(false);
+      setEditRoute(null);
+      refetch();
+    },
+    onError: (error) => toast.error(error.message || "Failed to update call route"),
+  });
+
   const deleteMutation = trpc.callRoutes.delete.useMutation({
     onSuccess: () => {
       toast.success("Call route deleted");
@@ -309,7 +324,17 @@ export default function CustomerCallRoutes() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => {
+                              setEditRoute({
+                                id: route.id,
+                                name: route.name,
+                                priority: route.priority || 0,
+                                destinationType: (route.destinationType as DestinationType) || "endpoint",
+                                matchPattern: route.matchPattern || "",
+                                status: route.status === 'active' ? 'active' : 'inactive',
+                              });
+                              setIsEditOpen(true);
+                            }}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -334,6 +359,60 @@ export default function CustomerCallRoutes() {
             )}
           </CardContent>
         </Card>
+        {/* Edit Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Call Route</DialogTitle>
+              <DialogDescription>Update call routing rule</DialogDescription>
+            </DialogHeader>
+            {editRoute && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Route Name</Label>
+                  <Input value={editRoute.name} onChange={(e) => setEditRoute({ ...editRoute, name: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Match Pattern</Label>
+                  <Input value={editRoute.matchPattern} onChange={(e) => setEditRoute({ ...editRoute, matchPattern: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Destination Type</Label>
+                  <Select value={editRoute.destinationType} onValueChange={(v) => setEditRoute({ ...editRoute, destinationType: v as DestinationType })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="endpoint">SIP Endpoint</SelectItem>
+                      <SelectItem value="ring_group">Ring Group</SelectItem>
+                      <SelectItem value="external">External Number</SelectItem>
+                      <SelectItem value="voicemail">Voicemail</SelectItem>
+                      <SelectItem value="ai_agent">AI Agent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Priority</Label>
+                  <Input type="number" value={editRoute.priority} onChange={(e) => setEditRoute({ ...editRoute, priority: parseInt(e.target.value) || 0 })} min={1} max={100} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Status</Label>
+                  <Select value={editRoute.status} onValueChange={(v) => setEditRoute({ ...editRoute, status: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+              <Button onClick={() => editRoute && updateMutation.mutate(editRoute)} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </CustomerLayout>
   );

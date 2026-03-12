@@ -12,19 +12,26 @@ import { nanoid } from "nanoid";
 
 export const telnyxWebhookRouter = Router();
 
-// Helper to parse JSON fields
+// Helper to parse JSON fields with type validation
 function parseJsonArray(value: unknown): number[] {
   if (!value) return [];
-  if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
+  let arr: unknown[];
+  if (Array.isArray(value)) {
+    arr = value;
+  } else if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
+      if (!Array.isArray(parsed)) return [];
+      arr = parsed;
     } catch {
+      console.warn("[Telnyx Webhook] Failed to parse JSON array:", value);
       return [];
     }
+  } else {
+    return [];
   }
-  return [];
+  // Ensure all elements are valid numbers
+  return arr.filter((item): item is number => typeof item === 'number' && !isNaN(item) && item > 0);
 }
 
 // Get SIP domain for Telnyx credential connections
@@ -302,7 +309,12 @@ telnyxWebhookRouter.post("/status", async (req: Request, res: Response) => {
 
     console.log(`[Telnyx Webhook] Call status update: ${CallSid} - ${CallStatus}`);
 
-    const phoneNumber = await db.getPhoneNumberByNumber(Direction === 'inbound' ? To : From);
+    const lookupNumber = Direction === 'inbound' ? To : From;
+    const phoneNumber = lookupNumber ? await db.getPhoneNumberByNumber(lookupNumber) : null;
+
+    if (!phoneNumber) {
+      console.warn(`[Telnyx Webhook] Phone number ${lookupNumber} not found for status update`);
+    }
 
     if (phoneNumber && CallStatus === 'completed') {
       await db.incrementUsageStats(phoneNumber.customerId, {
@@ -339,7 +351,12 @@ telnyxWebhookRouter.post("/recording", async (req: Request, res: Response) => {
 
     console.log(`[Telnyx Webhook] Recording ready: ${RecordingSid} for call ${CallSid}`);
 
-    const phoneNumber = await db.getPhoneNumberByNumber(Direction === 'inbound' ? To : From);
+    const recordingLookupNumber = Direction === 'inbound' ? To : From;
+    const phoneNumber = recordingLookupNumber ? await db.getPhoneNumberByNumber(recordingLookupNumber) : null;
+
+    if (!phoneNumber) {
+      console.warn(`[Telnyx Webhook] Phone number ${recordingLookupNumber} not found for recording ${RecordingSid}`);
+    }
 
     if (phoneNumber) {
       const recordingKey = `recordings/${phoneNumber.customerId}/${CallSid}-${nanoid(8)}.wav`;

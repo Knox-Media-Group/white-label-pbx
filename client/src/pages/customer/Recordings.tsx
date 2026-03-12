@@ -169,7 +169,19 @@ export default function CustomerRecordings() {
                               <Play className="mr-2 h-4 w-4" />
                               Play
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => toast.info("Download feature coming soon")}>
+                            <DropdownMenuItem onClick={() => {
+                              // Use the playback URL to trigger a download
+                              setPlaybackRecordingId(recording.id);
+                              const checkAndDownload = () => {
+                                // Open recording URL in new tab to trigger download
+                                if (recording.recordingUrl) {
+                                  window.open(recording.recordingUrl, '_blank');
+                                } else {
+                                  toast.error("No recording URL available");
+                                }
+                              };
+                              checkAndDownload();
+                            }}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </DropdownMenuItem>

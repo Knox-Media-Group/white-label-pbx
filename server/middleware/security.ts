@@ -46,8 +46,13 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
 export function verifyTelnyxWebhook(req: Request, res: Response, next: NextFunction) {
   const webhookSecret = process.env.TELNYX_WEBHOOK_SECRET;
 
-  // Skip verification if no secret is configured (development)
+  // Skip verification if no secret is configured (development only)
   if (!webhookSecret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error("[Security] TELNYX_WEBHOOK_SECRET is required in production");
+      res.status(500).json({ error: "Webhook verification not configured" });
+      return;
+    }
     next();
     return;
   }
@@ -56,8 +61,8 @@ export function verifyTelnyxWebhook(req: Request, res: Response, next: NextFunct
   const timestamp = req.headers["telnyx-timestamp"] as string;
 
   if (!signature || !timestamp) {
-    console.warn("[Security] Missing Telnyx webhook signature headers");
-    // Allow through in case of TeXML webhooks (which don't always include signatures)
+    // TeXML callbacks may not include signature headers — allow but log
+    console.warn("[Security] Missing Telnyx webhook signature headers (TeXML callback)");
     next();
     return;
   }

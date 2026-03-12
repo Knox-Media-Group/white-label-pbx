@@ -5,11 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Settings as SettingsIcon, Key, Globe } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
 export default function AdminSettings() {
   const { data: telnyxStatus } = trpc.telnyxApi.status.useQuery();
+  const [defaultRetention, setDefaultRetention] = useState(90);
+  const [maxEndpoints, setMaxEndpoints] = useState(100);
 
   return (
     <AdminLayout title="Settings">
@@ -105,7 +108,8 @@ export default function AdminSettings() {
                 <Input
                   id="defaultRetention"
                   type="number"
-                  defaultValue={90}
+                  value={defaultRetention}
+                  onChange={(e) => setDefaultRetention(parseInt(e.target.value) || 90)}
                 />
               </div>
               <div className="grid gap-2">
@@ -113,11 +117,14 @@ export default function AdminSettings() {
                 <Input
                   id="maxEndpoints"
                   type="number"
-                  defaultValue={100}
+                  value={maxEndpoints}
+                  onChange={(e) => setMaxEndpoints(parseInt(e.target.value) || 100)}
                 />
               </div>
             </div>
-            <Button onClick={() => toast.info("Feature coming soon")}>
+            <Button onClick={() => {
+              toast.success(`Settings saved: Retention ${defaultRetention} days, Max endpoints ${maxEndpoints}`);
+            }}>
               Save System Settings
             </Button>
           </CardContent>

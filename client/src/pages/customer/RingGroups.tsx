@@ -36,6 +36,11 @@ export default function CustomerRingGroups() {
   
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editGroup, setEditGroup] = useState<{
+    id: number; name: string; extensionNumber: string;
+    strategy: RingStrategy; ringTimeout: number; status: string;
+  } | null>(null);
   const [newGroup, setNewGroup] = useState({
     name: "",
     extensionNumber: "",
@@ -58,6 +63,16 @@ export default function CustomerRingGroups() {
     },
   });
   
+  const updateMutation = trpc.ringGroups.update.useMutation({
+    onSuccess: () => {
+      toast.success("Ring group updated");
+      setIsEditOpen(false);
+      setEditGroup(null);
+      refetch();
+    },
+    onError: (error) => toast.error(error.message || "Failed to update ring group"),
+  });
+
   const deleteMutation = trpc.ringGroups.delete.useMutation({
     onSuccess: () => {
       toast.success("Ring group deleted");
@@ -247,7 +262,17 @@ export default function CustomerRingGroups() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => {
+                              setEditGroup({
+                                id: group.id,
+                                name: group.name,
+                                extensionNumber: group.extensionNumber || "",
+                                strategy: (group.strategy as RingStrategy) || "simultaneous",
+                                ringTimeout: group.ringTimeout || 30,
+                                status: group.status || "active",
+                              });
+                              setIsEditOpen(true);
+                            }}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -272,6 +297,59 @@ export default function CustomerRingGroups() {
             )}
           </CardContent>
         </Card>
+        {/* Edit Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Ring Group</DialogTitle>
+              <DialogDescription>Update ring group settings</DialogDescription>
+            </DialogHeader>
+            {editGroup && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Group Name</Label>
+                  <Input value={editGroup.name} onChange={(e) => setEditGroup({ ...editGroup, name: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Extension Number</Label>
+                  <Input value={editGroup.extensionNumber} onChange={(e) => setEditGroup({ ...editGroup, extensionNumber: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Ring Strategy</Label>
+                  <Select value={editGroup.strategy} onValueChange={(v) => setEditGroup({ ...editGroup, strategy: v as RingStrategy })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="simultaneous">Ring All (Simultaneous)</SelectItem>
+                      <SelectItem value="sequential">Sequential</SelectItem>
+                      <SelectItem value="round_robin">Round Robin</SelectItem>
+                      <SelectItem value="random">Random</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Ring Timeout (seconds)</Label>
+                  <Input type="number" value={editGroup.ringTimeout} onChange={(e) => setEditGroup({ ...editGroup, ringTimeout: parseInt(e.target.value) || 30 })} min={5} max={120} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Status</Label>
+                  <Select value={editGroup.status} onValueChange={(v) => setEditGroup({ ...editGroup, status: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+              <Button onClick={() => editGroup && updateMutation.mutate(editGroup)} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </CustomerLayout>
   );

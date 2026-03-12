@@ -62,6 +62,10 @@ retellWebhookRouter.post("/call-status", async (req: Request, res: Response) => 
         }
       }
 
+      if (!customerIdNum) {
+        console.warn(`[Retell Webhook] Could not determine customer for call ${call_id} (to: ${to_number}). Usage stats and recording will not be saved.`);
+      }
+
       if (customerIdNum) {
         // Update usage stats
         const durationSec = Math.ceil((duration_ms || 0) / 1000);

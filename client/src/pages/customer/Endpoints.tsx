@@ -27,19 +27,25 @@ import {
 } from "@/components/ui/table";
 
 const DEMO_CUSTOMER_ID = 1;
+type CallHandler = "laml_webhooks" | "relay_context" | "relay_topic" | "ai_agent" | "video_room";
 
 export default function CustomerEndpoints() {
   const { user } = useAuth();
   const customerId = user?.customerId || DEMO_CUSTOMER_ID;
-  
+
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editEndpoint, setEditEndpoint] = useState<{
+    id: number; displayName: string; extensionNumber: string;
+    callerId: string; callHandler: CallHandler; status: string;
+  } | null>(null);
   const [newEndpoint, setNewEndpoint] = useState({
     username: "",
     displayName: "",
     extensionNumber: "",
     callerId: "",
-    callHandler: "laml_webhooks" as "laml_webhooks" | "relay_context" | "relay_topic" | "ai_agent" | "video_room",
+    callHandler: "laml_webhooks" as CallHandler,
   });
 
   const { data: endpoints, isLoading, refetch } = trpc.sipEndpoints.list.useQuery({ customerId });
@@ -56,6 +62,16 @@ export default function CustomerEndpoints() {
     },
   });
   
+  const updateMutation = trpc.sipEndpoints.update.useMutation({
+    onSuccess: () => {
+      toast.success("Endpoint updated");
+      setIsEditOpen(false);
+      setEditEndpoint(null);
+      refetch();
+    },
+    onError: (error) => toast.error(error.message || "Failed to update endpoint"),
+  });
+
   const deleteMutation = trpc.sipEndpoints.delete.useMutation({
     onSuccess: () => {
       toast.success("Endpoint deleted");
@@ -241,7 +257,17 @@ export default function CustomerEndpoints() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => {
+                              setEditEndpoint({
+                                id: endpoint.id,
+                                displayName: endpoint.displayName || "",
+                                extensionNumber: endpoint.extensionNumber || "",
+                                callerId: endpoint.callerId || "",
+                                callHandler: (endpoint.callHandler as CallHandler) || "laml_webhooks",
+                                status: endpoint.status || "active",
+                              });
+                              setIsEditOpen(true);
+                            }}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -266,6 +292,61 @@ export default function CustomerEndpoints() {
             )}
           </CardContent>
         </Card>
+        {/* Edit Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit SIP Endpoint</DialogTitle>
+              <DialogDescription>Update endpoint configuration</DialogDescription>
+            </DialogHeader>
+            {editEndpoint && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Display Name</Label>
+                  <Input value={editEndpoint.displayName} onChange={(e) => setEditEndpoint({ ...editEndpoint, displayName: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Extension Number</Label>
+                  <Input value={editEndpoint.extensionNumber} onChange={(e) => setEditEndpoint({ ...editEndpoint, extensionNumber: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Caller ID</Label>
+                  <Input value={editEndpoint.callerId} onChange={(e) => setEditEndpoint({ ...editEndpoint, callerId: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Call Handler</Label>
+                  <Select value={editEndpoint.callHandler} onValueChange={(v) => setEditEndpoint({ ...editEndpoint, callHandler: v as CallHandler })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="laml_webhooks">LaML Webhooks</SelectItem>
+                      <SelectItem value="relay_context">Relay Context</SelectItem>
+                      <SelectItem value="relay_topic">Relay Topic</SelectItem>
+                      <SelectItem value="ai_agent">AI Agent</SelectItem>
+                      <SelectItem value="video_room">Video Room</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Status</Label>
+                  <Select value={editEndpoint.status} onValueChange={(v) => setEditEndpoint({ ...editEndpoint, status: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                      <SelectItem value="provisioning">Provisioning</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+              <Button onClick={() => editEndpoint && updateMutation.mutate(editEndpoint)} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </CustomerLayout>
   );

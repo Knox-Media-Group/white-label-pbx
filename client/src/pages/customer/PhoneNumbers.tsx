@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { Plus, Search, MoreHorizontal, PhoneCall, Trash2, Edit } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,11 @@ export default function CustomerPhoneNumbers() {
   
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editNumber, setEditNumber] = useState<{
+    id: number; friendlyName: string; status: string;
+    assignedToEndpointId: number | null; assignedToRingGroupId: number | null;
+  } | null>(null);
   const [newNumber, setNewNumber] = useState({
     phoneNumber: "",
     friendlyName: "",
@@ -52,6 +58,16 @@ export default function CustomerPhoneNumbers() {
     },
   });
   
+  const updateMutation = trpc.phoneNumbers.update.useMutation({
+    onSuccess: () => {
+      toast.success("Phone number updated");
+      setIsEditOpen(false);
+      setEditNumber(null);
+      refetch();
+    },
+    onError: (error) => toast.error(error.message || "Failed to update phone number"),
+  });
+
   const deleteMutation = trpc.phoneNumbers.delete.useMutation({
     onSuccess: () => {
       toast.success("Phone number removed");
@@ -203,7 +219,16 @@ export default function CustomerPhoneNumbers() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => toast.info("Edit feature coming soon")}>
+                            <DropdownMenuItem onClick={() => {
+                              setEditNumber({
+                                id: number.id,
+                                friendlyName: number.friendlyName || "",
+                                status: number.status || "active",
+                                assignedToEndpointId: number.assignedToEndpointId ?? null,
+                                assignedToRingGroupId: number.assignedToRingGroupId ?? null,
+                              });
+                              setIsEditOpen(true);
+                            }}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit
                             </DropdownMenuItem>
@@ -228,6 +253,39 @@ export default function CustomerPhoneNumbers() {
             )}
           </CardContent>
         </Card>
+        {/* Edit Dialog */}
+        <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Phone Number</DialogTitle>
+              <DialogDescription>Update phone number settings</DialogDescription>
+            </DialogHeader>
+            {editNumber && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Friendly Name</Label>
+                  <Input value={editNumber.friendlyName} onChange={(e) => setEditNumber({ ...editNumber, friendlyName: e.target.value })} />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Status</Label>
+                  <Select value={editNumber.status} onValueChange={(v) => setEditNumber({ ...editNumber, status: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
+              <Button onClick={() => editNumber && updateMutation.mutate(editNumber)} disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </CustomerLayout>
   );

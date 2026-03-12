@@ -7,18 +7,19 @@
 # Supports: Ubuntu/Debian, AlmaLinux/RHEL/CentOS/Rocky
 #
 # HOW TO RUN:
-#   ssh root@149.28.121.133
-#   bash /opt/white-label-pbx/deploy/full-deploy.sh
+#   ssh root@YOUR_SERVER_IP
+#   PBX_DOMAIN=yourdomain.com PBX_BRANCH=main bash /opt/white-label-pbx/deploy/full-deploy.sh
 # =============================================================
 
 set -euo pipefail
 
-DOMAIN="kltconnect.com"
-SERVER_IP="149.28.121.133"
-APP_DIR="/opt/white-label-pbx"
-LOG_DIR="/var/log/pbx"
-REPO_URL="https://github.com/Knox-Media-Group/white-label-pbx.git"
-BRANCH="claude/explore-pbx-system-oorwR"
+# Configurable via environment variables
+DOMAIN="${PBX_DOMAIN:-kltconnect.com}"
+SERVER_IP="${PBX_SERVER_IP:-149.28.121.133}"
+APP_DIR="${PBX_APP_DIR:-/opt/white-label-pbx}"
+LOG_DIR="${PBX_LOG_DIR:-/var/log/pbx}"
+REPO_URL="${PBX_REPO_URL:-https://github.com/Knox-Media-Group/white-label-pbx.git}"
+BRANCH="${PBX_BRANCH:-main}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
