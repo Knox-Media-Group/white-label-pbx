@@ -1,8 +1,10 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME } from "@shared/const";
 import type { Express, Request, Response } from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
+import { ENV } from "./env";
 import { sdk } from "./sdk";
+import { writeAuditLog } from "./audit";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -36,17 +38,35 @@ export function registerOAuthRoutes(app: Express) {
         lastSignedIn: new Date(),
       });
 
+      const sessionTtl = ENV.sessionTtlMs;
+
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
         name: userInfo.name || "",
-        expiresInMs: ONE_YEAR_MS,
+        expiresInMs: sessionTtl,
       });
 
       const cookieOptions = getSessionCookieOptions(req);
-      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+      res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: sessionTtl });
+
+      writeAuditLog({
+        userEmail: userInfo.email ?? undefined,
+        action: "login",
+        resource: "session",
+        outcome: "success",
+        ipAddress: req.ip ?? req.socket.remoteAddress ?? undefined,
+        userAgent: req.headers["user-agent"] ?? undefined,
+      });
 
       res.redirect(302, "/");
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
+      writeAuditLog({
+        action: "login_failed",
+        resource: "session",
+        outcome: "error",
+        ipAddress: req.ip ?? req.socket.remoteAddress ?? undefined,
+        detail: { error: String(error) },
+      });
       res.status(500).json({ error: "OAuth callback failed" });
     }
   });

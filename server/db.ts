@@ -1,7 +1,7 @@
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { 
-  InsertUser, users, 
+import {
+  InsertUser, users,
   customers, InsertCustomer, Customer,
   sipEndpoints, InsertSipEndpoint, SipEndpoint,
   phoneNumbers, InsertPhoneNumber, PhoneNumber,
@@ -12,7 +12,11 @@ import {
   notifications, InsertNotification, Notification,
   notificationSettings, InsertNotificationSettings, NotificationSettings,
   llmCallFlows, InsertLlmCallFlow, LlmCallFlow,
-  retentionPolicies, InsertRetentionPolicy, RetentionPolicy
+  retentionPolicies, InsertRetentionPolicy, RetentionPolicy,
+  auditLogs, InsertAuditLog, AuditLog,
+  metricsHistory, InsertMetricsHistory, MetricsHistory,
+  alertRules, InsertAlertRule, AlertRule,
+  alertEvents, InsertAlertEvent, AlertEvent,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -487,4 +491,86 @@ export async function incrementUsageStats(customerId: number, increments: {
       totalMinutes: increments.totalMinutes || 0,
     });
   }
+}
+
+// ============ AUDIT LOG OPERATIONS ============
+export async function getAuditLogs(opts: { limit?: number; offset?: number; userId?: number; action?: string } = {}): Promise<AuditLog[]> {
+  const db = await getDb();
+  if (!db) return [];
+  let q = db.select().from(auditLogs);
+  if (opts.userId) {
+    q = q.where(eq(auditLogs.userId, opts.userId)) as any;
+  }
+  if (opts.action) {
+    q = q.where(eq(auditLogs.action, opts.action)) as any;
+  }
+  return (q as any).orderBy(desc(auditLogs.createdAt)).limit(opts.limit ?? 100).offset(opts.offset ?? 0);
+}
+
+// ============ METRICS HISTORY OPERATIONS ============
+export async function recordMetric(metric: InsertMetricsHistory): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(metricsHistory).values(metric);
+}
+
+export async function getMetricsHistory(metricName: string, opts: { customerId?: number; limit?: number } = {}): Promise<MetricsHistory[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const condition = opts.customerId
+    ? and(eq(metricsHistory.metricName, metricName), eq(metricsHistory.customerId, opts.customerId))
+    : eq(metricsHistory.metricName, metricName);
+  return db.select().from(metricsHistory).where(condition).orderBy(desc(metricsHistory.collectedAt)).limit(opts.limit ?? 100);
+}
+
+// ============ ALERT RULES OPERATIONS ============
+export async function getAlertRules(customerId?: number): Promise<AlertRule[]> {
+  const db = await getDb();
+  if (!db) return [];
+  if (customerId) {
+    return db.select().from(alertRules).where(eq(alertRules.customerId, customerId));
+  }
+  return db.select().from(alertRules);
+}
+
+export async function createAlertRule(rule: InsertAlertRule): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(alertRules).values(rule);
+  return result[0].insertId;
+}
+
+export async function updateAlertRule(id: number, data: Partial<InsertAlertRule>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(alertRules).set(data).where(eq(alertRules.id, id));
+}
+
+export async function deleteAlertRule(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(alertRules).where(eq(alertRules.id, id));
+}
+
+// ============ ALERT EVENTS OPERATIONS ============
+export async function getAlertEvents(opts: { alertRuleId?: number; limit?: number } = {}): Promise<AlertEvent[]> {
+  const db = await getDb();
+  if (!db) return [];
+  if (opts.alertRuleId) {
+    return db.select().from(alertEvents).where(eq(alertEvents.alertRuleId, opts.alertRuleId)).orderBy(desc(alertEvents.createdAt)).limit(opts.limit ?? 50);
+  }
+  return db.select().from(alertEvents).orderBy(desc(alertEvents.createdAt)).limit(opts.limit ?? 50);
+}
+
+export async function createAlertEvent(event: InsertAlertEvent): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(alertEvents).values(event);
+  return result[0].insertId;
+}
+
+export async function acknowledgeAlertEvent(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(alertEvents).set({ acknowledged: true }).where(eq(alertEvents.id, id));
 }

@@ -2,7 +2,8 @@ import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, boolean, json } f
 
 /**
  * Core user table backing auth flow.
- * Extended with role for admin/customer separation.
+ * Roles: viewer (read-only), operator (day-to-day ops), admin (full control).
+ * Legacy "user" maps to "viewer" at runtime for backward compatibility.
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -10,8 +11,9 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  customerId: int("customerId"), // Links to customer for customer portal users
+  role: mysqlEnum("role", ["user", "viewer", "operator", "admin"]).default("viewer").notNull(),
+  customerId: int("customerId"),
+  sessionVersion: int("sessionVersion").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -275,3 +277,73 @@ export const retentionPolicies = mysqlTable("retentionPolicies", {
 
 export type RetentionPolicy = typeof retentionPolicies.$inferSelect;
 export type InsertRetentionPolicy = typeof retentionPolicies.$inferInsert;
+
+/**
+ * Audit Log - immutable record of all state-changing actions
+ */
+export const auditLogs = mysqlTable("auditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"),
+  userEmail: varchar("userEmail", { length: 320 }),
+  userRole: varchar("userRole", { length: 32 }),
+  action: varchar("action", { length: 128 }).notNull(),
+  resource: varchar("resource", { length: 128 }).notNull(),
+  resourceId: varchar("resourceId", { length: 64 }),
+  detail: json("detail"),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  outcome: mysqlEnum("outcome", ["success", "denied", "error"]).default("success").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = typeof auditLogs.$inferInsert;
+
+/**
+ * Metrics History - periodic snapshots for trend analysis
+ */
+export const metricsHistory = mysqlTable("metricsHistory", {
+  id: int("id").autoincrement().primaryKey(),
+  metricName: varchar("metricName", { length: 128 }).notNull(),
+  metricValue: int("metricValue").notNull(),
+  customerId: int("customerId"),
+  tags: json("tags"),
+  collectedAt: timestamp("collectedAt").defaultNow().notNull(),
+});
+
+export type MetricsHistory = typeof metricsHistory.$inferSelect;
+export type InsertMetricsHistory = typeof metricsHistory.$inferInsert;
+
+/**
+ * Alert Rules - configurable threshold alerts
+ */
+export const alertRules = mysqlTable("alertRules", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  metricName: varchar("metricName", { length: 128 }).notNull(),
+  operator: mysqlEnum("operator", ["gt", "lt", "gte", "lte", "eq"]).notNull(),
+  threshold: int("threshold").notNull(),
+  customerId: int("customerId"),
+  enabled: boolean("enabled").default(true).notNull(),
+  lastTriggeredAt: timestamp("lastTriggeredAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AlertRule = typeof alertRules.$inferSelect;
+export type InsertAlertRule = typeof alertRules.$inferInsert;
+
+/**
+ * Alert Events - fired alert instances
+ */
+export const alertEvents = mysqlTable("alertEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  alertRuleId: int("alertRuleId").notNull(),
+  metricValue: int("metricValue").notNull(),
+  message: text("message"),
+  acknowledged: boolean("acknowledged").default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AlertEvent = typeof alertEvents.$inferSelect;
+export type InsertAlertEvent = typeof alertEvents.$inferInsert;

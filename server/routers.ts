@@ -1,7 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
+import { hasRole } from "@shared/rbac";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, viewerProcedure, operatorProcedure, adminProcedure, router } from "./_core/trpc";
+import { writeAuditLog } from "./_core/audit";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
@@ -9,30 +11,59 @@ import { invokeLLM } from "./_core/llm";
 import { storagePut, storageGet } from "./storage";
 import * as signalwire from "./signalwire";
 
-// Admin-only procedure
-const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== 'admin') {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin access required' });
-  }
-  return next({ ctx });
-});
-
-// Customer procedure - for customer portal access
+// Customer procedure - viewer+ with customer binding check
 const customerProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (!ctx.user.customerId && ctx.user.role !== 'admin') {
+  if (!ctx.user.customerId && !hasRole(ctx.user.role, 'admin')) {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Customer access required' });
   }
   return next({ ctx });
 });
 
+// Customer operator - operator+ with customer binding
+const customerOperatorProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!hasRole(ctx.user.role, 'operator')) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Operator access required' });
+  }
+  if (!ctx.user.customerId && !hasRole(ctx.user.role, 'admin')) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Customer access required' });
+  }
+  return next({ ctx });
+});
+
+/** Helper: verify customer ownership or admin */
+function assertCustomerAccess(ctx: { user: { role: string; customerId: number | null } }, customerId: number) {
+  if (!hasRole(ctx.user.role, 'admin') && ctx.user.customerId !== customerId) {
+    throw new TRPCError({ code: 'FORBIDDEN' });
+  }
+}
+
+/** Helper: audit a mutation */
+function audit(ctx: { user: { id: number; email: string | null; role: string }; req: any }, action: string, resource: string, resourceId?: string | number, detail?: unknown) {
+  writeAuditLog({
+    userId: ctx.user.id,
+    userEmail: ctx.user.email ?? undefined,
+    userRole: ctx.user.role,
+    action,
+    resource,
+    resourceId: resourceId != null ? String(resourceId) : undefined,
+    detail: detail ?? undefined,
+    outcome: "success",
+    ipAddress: ctx.req.ip ?? ctx.req.socket?.remoteAddress ?? undefined,
+    userAgent: ctx.req.headers?.["user-agent"] ?? undefined,
+  });
+}
+
 export const appRouter = router({
   system: systemRouter,
-  
+
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      if (ctx.user) {
+        audit(ctx as any, "logout", "session");
+      }
       return { success: true } as const;
     }),
   }),
@@ -42,13 +73,13 @@ export const appRouter = router({
     list: adminProcedure.query(async () => {
       return db.getAllCustomers();
     }),
-    
+
     getById: adminProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getCustomerById(input.id);
       }),
-    
+
     create: adminProcedure
       .input(z.object({
         name: z.string().min(1),
@@ -57,7 +88,7 @@ export const appRouter = router({
         phone: z.string().optional(),
         notes: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const id = await db.createCustomer({
           name: input.name,
           companyName: input.companyName || null,
@@ -66,9 +97,10 @@ export const appRouter = router({
           notes: input.notes || null,
           status: 'pending',
         });
+        audit(ctx, "create", "customer", id, { name: input.name });
         return { id };
       }),
-    
+
     update: adminProcedure
       .input(z.object({
         id: z.number(),
@@ -81,27 +113,28 @@ export const appRouter = router({
         signalwireSubprojectSid: z.string().optional(),
         signalwireApiToken: z.string().optional(),
         signalwireSpaceUrl: z.string().optional(),
-        // SMS Summary settings
         smsSummaryEnabled: z.boolean().optional(),
         notificationPhone: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updateCustomer(id, data);
+        audit(ctx, "update", "customer", id, { fields: Object.keys(data) });
         return { success: true };
       }),
-    
+
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteCustomer(input.id);
+        audit(ctx, "delete", "customer", input.id);
         return { success: true };
       }),
-    
+
     stats: adminProcedure.query(async () => {
       return db.getCustomerStats();
     }),
-    
+
     updateBranding: adminProcedure
       .input(z.object({
         id: z.number(),
@@ -109,9 +142,10 @@ export const appRouter = router({
         brandingPrimaryColor: z.string().optional(),
         brandingCompanyName: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updateCustomer(id, data);
+        audit(ctx, "update_branding", "customer", id);
         return { success: true };
       }),
   }),
@@ -121,20 +155,17 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        // Verify access
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getSipEndpointsByCustomer(input.customerId);
       }),
-    
+
     getById: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getSipEndpointById(input.id);
       }),
-    
-    create: customerProcedure
+
+    create: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         username: z.string().min(1),
@@ -146,9 +177,7 @@ export const appRouter = router({
         callRequestUrl: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         const id = await db.createSipEndpoint({
           customerId: input.customerId,
           username: input.username,
@@ -160,10 +189,11 @@ export const appRouter = router({
           callRequestUrl: input.callRequestUrl || null,
           status: 'provisioning',
         });
+        audit(ctx, "create", "sipEndpoint", id, { username: input.username });
         return { id };
       }),
-    
-    update: customerProcedure
+
+    update: customerOperatorProcedure
       .input(z.object({
         id: z.number(),
         username: z.string().optional(),
@@ -176,16 +206,18 @@ export const appRouter = router({
         callRequestUrl: z.string().optional(),
         signalwireEndpointId: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updateSipEndpoint(id, data);
+        audit(ctx, "update", "sipEndpoint", id);
         return { success: true };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteSipEndpoint(input.id);
+        audit(ctx, "delete", "sipEndpoint", input.id);
         return { success: true };
       }),
   }),
@@ -195,19 +227,17 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getPhoneNumbersByCustomer(input.customerId);
       }),
-    
+
     getById: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getPhoneNumberById(input.id);
       }),
-    
-    create: customerProcedure
+
+    create: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         phoneNumber: z.string().min(1),
@@ -219,9 +249,7 @@ export const appRouter = router({
         callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         const id = await db.createPhoneNumber({
           customerId: input.customerId,
           phoneNumber: input.phoneNumber,
@@ -233,10 +261,11 @@ export const appRouter = router({
           callHandler: input.callHandler || 'laml_webhooks',
           status: 'active',
         });
+        audit(ctx, "create", "phoneNumber", id, { phoneNumber: input.phoneNumber });
         return { id };
       }),
-    
-    update: customerProcedure
+
+    update: customerOperatorProcedure
       .input(z.object({
         id: z.number(),
         friendlyName: z.string().optional(),
@@ -247,16 +276,18 @@ export const appRouter = router({
         callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent', 'sip_endpoint', 'ring_group']).optional(),
         status: z.enum(['active', 'inactive', 'porting']).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updatePhoneNumber(id, data);
+        audit(ctx, "update", "phoneNumber", id);
         return { success: true };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deletePhoneNumber(input.id);
+        audit(ctx, "delete", "phoneNumber", input.id);
         return { success: true };
       }),
   }),
@@ -266,19 +297,17 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getRingGroupsByCustomer(input.customerId);
       }),
-    
+
     getById: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getRingGroupById(input.id);
       }),
-    
-    create: customerProcedure
+
+    create: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         name: z.string().min(1),
@@ -291,9 +320,7 @@ export const appRouter = router({
         failoverDestination: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         const id = await db.createRingGroup({
           customerId: input.customerId,
           name: input.name,
@@ -306,10 +333,11 @@ export const appRouter = router({
           failoverDestination: input.failoverDestination || null,
           status: 'active',
         });
+        audit(ctx, "create", "ringGroup", id, { name: input.name });
         return { id };
       }),
-    
-    update: customerProcedure
+
+    update: customerOperatorProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().optional(),
@@ -322,16 +350,18 @@ export const appRouter = router({
         failoverDestination: z.string().optional(),
         status: z.enum(['active', 'inactive']).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updateRingGroup(id, data);
+        audit(ctx, "update", "ringGroup", id);
         return { success: true };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteRingGroup(input.id);
+        audit(ctx, "delete", "ringGroup", input.id);
         return { success: true };
       }),
   }),
@@ -341,19 +371,17 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getCallRoutesByCustomer(input.customerId);
       }),
-    
+
     getById: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getCallRouteById(input.id);
       }),
-    
-    create: customerProcedure
+
+    create: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         name: z.string().min(1),
@@ -369,9 +397,7 @@ export const appRouter = router({
         destinationExternal: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         const id = await db.createCallRoute({
           customerId: input.customerId,
           name: input.name,
@@ -387,10 +413,11 @@ export const appRouter = router({
           destinationExternal: input.destinationExternal || null,
           status: 'active',
         });
+        audit(ctx, "create", "callRoute", id, { name: input.name });
         return { id };
       }),
-    
-    update: customerProcedure
+
+    update: customerOperatorProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().optional(),
@@ -406,16 +433,18 @@ export const appRouter = router({
         destinationExternal: z.string().optional(),
         status: z.enum(['active', 'inactive']).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await db.updateCallRoute(id, data);
+        audit(ctx, "update", "callRoute", id);
         return { success: true };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteCallRoute(input.id);
+        audit(ctx, "delete", "callRoute", input.id);
         return { success: true };
       }),
   }),
@@ -425,13 +454,11 @@ export const appRouter = router({
     global: adminProcedure.query(async () => {
       return db.getGlobalUsageStats();
     }),
-    
+
     byCustomer: customerProcedure
       .input(z.object({ customerId: z.number(), limit: z.number().optional() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getUsageStatsByCustomer(input.customerId, input.limit);
       }),
   }),
@@ -441,18 +468,16 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number(), limit: z.number().optional() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getCallRecordingsByCustomer(input.customerId, input.limit);
       }),
-    
+
     getById: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return db.getCallRecordingById(input.id);
       }),
-    
+
     getPlaybackUrl: customerProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
@@ -463,35 +488,32 @@ export const appRouter = router({
         const { url } = await storageGet(recording.recordingKey);
         return { url };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteCallRecording(input.id);
+        audit(ctx, "delete", "callRecording", input.id);
         return { success: true };
       }),
-    
+
     retentionPolicy: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getRetentionPolicy(input.customerId);
       }),
-    
-    updateRetentionPolicy: customerProcedure
+
+    updateRetentionPolicy: adminProcedure
       .input(z.object({
         customerId: z.number(),
         defaultRetentionDays: z.number().optional(),
         autoDeleteEnabled: z.boolean().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
         const { customerId, ...policy } = input;
         await db.upsertRetentionPolicy(customerId, policy);
+        audit(ctx, "update_retention", "customer", customerId, policy);
         return { success: true };
       }),
   }),
@@ -501,38 +523,32 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number(), limit: z.number().optional() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getNotificationsByCustomer(input.customerId, input.limit);
       }),
-    
+
     unread: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getUnreadNotifications(input.customerId);
       }),
-    
+
     markAsRead: customerProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         await db.markNotificationAsRead(input.id);
         return { success: true };
       }),
-    
+
     settings: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getNotificationSettings(input.customerId);
       }),
-    
-    updateSettings: customerProcedure
+
+    updateSettings: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         missedCallEmail: z.boolean().optional(),
@@ -546,33 +562,28 @@ export const appRouter = router({
         recordingReadyInApp: z.boolean().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         const { customerId, ...settings } = input;
         await db.upsertNotificationSettings(customerId, settings);
+        audit(ctx, "update_notification_settings", "customer", customerId);
         return { success: true };
       }),
   }),
 
   // ============ SIGNALWIRE API ============
   signalwireApi: router({
-    // Check if SignalWire is configured
     status: adminProcedure.query(async () => {
       return signalwire.getCredentialsSummary();
     }),
-    
-    // Get account info
+
     accountInfo: adminProcedure.query(async () => {
       return signalwire.getAccountInfo();
     }),
-    
-    // List SIP endpoints from SignalWire
+
     listSipEndpoints: adminProcedure.query(async () => {
       return signalwire.listSipEndpoints();
     }),
-    
-    // Create SIP endpoint in SignalWire
+
     createSipEndpoint: adminProcedure
       .input(z.object({
         username: z.string().min(1),
@@ -582,11 +593,12 @@ export const appRouter = router({
         callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
         callRequestUrl: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
-        return signalwire.createSipEndpoint(input);
+      .mutation(async ({ input, ctx }) => {
+        const result = await signalwire.createSipEndpoint(input);
+        audit(ctx, "sw_create_endpoint", "signalwire", undefined, { username: input.username });
+        return result;
       }),
-    
-    // Update SIP endpoint in SignalWire
+
     updateSipEndpoint: adminProcedure
       .input(z.object({
         id: z.string(),
@@ -595,19 +607,21 @@ export const appRouter = router({
         callHandler: z.enum(['laml_webhooks', 'relay_context', 'relay_topic', 'ai_agent']).optional(),
         callRequestUrl: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { id, ...params } = input;
-        return signalwire.updateSipEndpoint(id, params);
+        const result = await signalwire.updateSipEndpoint(id, params);
+        audit(ctx, "sw_update_endpoint", "signalwire", id);
+        return result;
       }),
-    
-    // Delete SIP endpoint from SignalWire
+
     deleteSipEndpoint: adminProcedure
       .input(z.object({ id: z.string() }))
-      .mutation(async ({ input }) => {
-        return signalwire.deleteSipEndpoint(input.id);
+      .mutation(async ({ input, ctx }) => {
+        const result = await signalwire.deleteSipEndpoint(input.id);
+        audit(ctx, "sw_delete_endpoint", "signalwire", input.id);
+        return result;
       }),
-    
-    // Search available phone numbers
+
     searchPhoneNumbers: adminProcedure
       .input(z.object({
         areaCode: z.string().optional(),
@@ -618,23 +632,22 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return signalwire.searchAvailablePhoneNumbers(input);
       }),
-    
-    // List owned phone numbers
+
     listPhoneNumbers: adminProcedure.query(async () => {
       return signalwire.listPhoneNumbers();
     }),
-    
-    // Purchase a phone number
+
     purchasePhoneNumber: adminProcedure
       .input(z.object({
         phoneNumber: z.string(),
         friendlyName: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
-        return signalwire.purchasePhoneNumber(input.phoneNumber, input.friendlyName);
+      .mutation(async ({ input, ctx }) => {
+        const result = await signalwire.purchasePhoneNumber(input.phoneNumber, input.friendlyName);
+        audit(ctx, "sw_purchase_number", "signalwire", undefined, { phoneNumber: input.phoneNumber });
+        return result;
       }),
-    
-    // Update phone number configuration
+
     updatePhoneNumber: adminProcedure
       .input(z.object({
         sid: z.string(),
@@ -642,19 +655,21 @@ export const appRouter = router({
         voiceUrl: z.string().optional(),
         voiceMethod: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const { sid, ...params } = input;
-        return signalwire.updatePhoneNumber(sid, params);
+        const result = await signalwire.updatePhoneNumber(sid, params);
+        audit(ctx, "sw_update_number", "signalwire", sid);
+        return result;
       }),
-    
-    // Release a phone number
+
     releasePhoneNumber: adminProcedure
       .input(z.object({ sid: z.string() }))
-      .mutation(async ({ input }) => {
-        return signalwire.releasePhoneNumber(input.sid);
+      .mutation(async ({ input, ctx }) => {
+        const result = await signalwire.releasePhoneNumber(input.sid);
+        audit(ctx, "sw_release_number", "signalwire", input.sid);
+        return result;
       }),
-    
-    // List calls
+
     listCalls: adminProcedure
       .input(z.object({
         from: z.string().optional(),
@@ -664,8 +679,7 @@ export const appRouter = router({
       .query(async ({ input }) => {
         return signalwire.listCalls(input);
       }),
-    
-    // List recordings from SignalWire
+
     listRecordings: adminProcedure
       .input(z.object({ callSid: z.string().optional() }).optional())
       .query(async ({ input }) => {
@@ -678,30 +692,25 @@ export const appRouter = router({
     list: customerProcedure
       .input(z.object({ customerId: z.number() }))
       .query(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
+        assertCustomerAccess(ctx, input.customerId);
         return db.getLlmCallFlowsByCustomer(input.customerId);
       }),
-    
-    create: customerProcedure
+
+    create: customerOperatorProcedure
       .input(z.object({
         customerId: z.number(),
         name: z.string().min(1),
         naturalLanguageConfig: z.string(),
       }))
       .mutation(async ({ input, ctx }) => {
-        if (ctx.user.role !== 'admin' && ctx.user.customerId !== input.customerId) {
-          throw new TRPCError({ code: 'FORBIDDEN' });
-        }
-        
-        // Generate LaML from natural language using LLM
+        assertCustomerAccess(ctx, input.customerId);
+
         const llmResponse = await invokeLLM({
           messages: [
             {
               role: 'system',
               content: `You are an expert at creating SignalWire LaML (XML) call flows. Convert the user's natural language description into valid LaML XML. Only output the XML, no explanations.
-              
+
 Available LaML verbs:
 - <Say>: Text-to-speech
 - <Play>: Play audio file
@@ -725,10 +734,10 @@ Example output:
             }
           ]
         });
-        
+
         const createContent = llmResponse.choices[0]?.message?.content;
         const generatedLaml = typeof createContent === 'string' ? createContent : '';
-        
+
         const id = await db.createLlmCallFlow({
           customerId: input.customerId,
           name: input.name,
@@ -737,16 +746,17 @@ Example output:
           isActive: false,
           lastGeneratedAt: new Date(),
         });
-        
+
+        audit(ctx, "create", "llmCallFlow", id, { name: input.name });
         return { id, generatedLaml };
       }),
-    
-    regenerate: customerProcedure
+
+    regenerate: customerOperatorProcedure
       .input(z.object({
         id: z.number(),
         naturalLanguageConfig: z.string(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const llmResponse = await invokeLLM({
           messages: [
             {
@@ -759,38 +769,40 @@ Example output:
             }
           ]
         });
-        
+
         const regenContent = llmResponse.choices[0]?.message?.content;
         const generatedLaml = typeof regenContent === 'string' ? regenContent : '';
-        
+
         await db.updateLlmCallFlow(input.id, {
           naturalLanguageConfig: input.naturalLanguageConfig,
           generatedLaml,
           lastGeneratedAt: new Date(),
         });
-        
+
+        audit(ctx, "regenerate", "llmCallFlow", input.id);
         return { generatedLaml };
       }),
-    
-    activate: customerProcedure
+
+    activate: customerOperatorProcedure
       .input(z.object({ id: z.number(), isActive: z.boolean() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.updateLlmCallFlow(input.id, { isActive: input.isActive });
+        audit(ctx, input.isActive ? "activate" : "deactivate", "llmCallFlow", input.id);
         return { success: true };
       }),
-    
-    delete: customerProcedure
+
+    delete: adminProcedure
       .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         await db.deleteLlmCallFlow(input.id);
+        audit(ctx, "delete", "llmCallFlow", input.id);
         return { success: true };
       }),
-    
-    // Get intelligent routing suggestions
+
     getRoutingSuggestions: customerProcedure
       .input(z.object({
         customerId: z.number(),
-        context: z.string(), // Description of current call patterns
+        context: z.string(),
       }))
       .mutation(async ({ input }) => {
         const llmResponse = await invokeLLM({
@@ -805,12 +817,11 @@ Example output:
             }
           ]
         });
-        
+
         const suggestContent = llmResponse.choices[0]?.message?.content;
         return { suggestions: typeof suggestContent === 'string' ? suggestContent : '' };
       }),
-    
-    // Generate call summary
+
     summarizeCall: customerProcedure
       .input(z.object({
         recordingId: z.number(),
@@ -829,13 +840,136 @@ Example output:
             }
           ]
         });
-        
+
         const summaryContent = llmResponse.choices[0]?.message?.content;
         const summary = typeof summaryContent === 'string' ? summaryContent : '';
         await db.updateCallRecording(input.recordingId, { summary });
-        
+
         return { summary };
       }),
+  }),
+
+  // ============ AUDIT LOGS (admin-only read access) ============
+  auditLogs: router({
+    list: adminProcedure
+      .input(z.object({
+        limit: z.number().min(1).max(500).optional(),
+        offset: z.number().min(0).optional(),
+        userId: z.number().optional(),
+        action: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return db.getAuditLogs(input ?? {});
+      }),
+  }),
+
+  // ============ METRICS HISTORY ============
+  metrics: router({
+    history: adminProcedure
+      .input(z.object({
+        metricName: z.string(),
+        customerId: z.number().optional(),
+        limit: z.number().min(1).max(500).optional(),
+      }))
+      .query(async ({ input }) => {
+        return db.getMetricsHistory(input.metricName, {
+          customerId: input.customerId,
+          limit: input.limit,
+        });
+      }),
+
+    record: adminProcedure
+      .input(z.object({
+        metricName: z.string(),
+        metricValue: z.number(),
+        customerId: z.number().optional(),
+        tags: z.record(z.string(), z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        await db.recordMetric({
+          metricName: input.metricName,
+          metricValue: input.metricValue,
+          customerId: input.customerId ?? null,
+          tags: input.tags ?? null,
+        });
+        return { success: true };
+      }),
+  }),
+
+  // ============ ALERT RULES & EVENTS ============
+  alerts: router({
+    rules: router({
+      list: adminProcedure
+        .input(z.object({ customerId: z.number().optional() }).optional())
+        .query(async ({ input }) => {
+          return db.getAlertRules(input?.customerId);
+        }),
+
+      create: adminProcedure
+        .input(z.object({
+          name: z.string().min(1),
+          metricName: z.string(),
+          operator: z.enum(['gt', 'lt', 'gte', 'lte', 'eq']),
+          threshold: z.number(),
+          customerId: z.number().optional(),
+          enabled: z.boolean().optional(),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const id = await db.createAlertRule({
+            name: input.name,
+            metricName: input.metricName,
+            operator: input.operator,
+            threshold: input.threshold,
+            customerId: input.customerId ?? null,
+            enabled: input.enabled ?? true,
+          });
+          audit(ctx, "create", "alertRule", id, { name: input.name });
+          return { id };
+        }),
+
+      update: adminProcedure
+        .input(z.object({
+          id: z.number(),
+          name: z.string().optional(),
+          metricName: z.string().optional(),
+          operator: z.enum(['gt', 'lt', 'gte', 'lte', 'eq']).optional(),
+          threshold: z.number().optional(),
+          enabled: z.boolean().optional(),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const { id, ...data } = input;
+          await db.updateAlertRule(id, data);
+          audit(ctx, "update", "alertRule", id);
+          return { success: true };
+        }),
+
+      delete: adminProcedure
+        .input(z.object({ id: z.number() }))
+        .mutation(async ({ input, ctx }) => {
+          await db.deleteAlertRule(input.id);
+          audit(ctx, "delete", "alertRule", input.id);
+          return { success: true };
+        }),
+    }),
+
+    events: router({
+      list: adminProcedure
+        .input(z.object({
+          alertRuleId: z.number().optional(),
+          limit: z.number().min(1).max(200).optional(),
+        }).optional())
+        .query(async ({ input }) => {
+          return db.getAlertEvents(input ?? {});
+        }),
+
+      acknowledge: adminProcedure
+        .input(z.object({ id: z.number() }))
+        .mutation(async ({ input, ctx }) => {
+          await db.acknowledgeAlertEvent(input.id);
+          audit(ctx, "acknowledge", "alertEvent", input.id);
+          return { success: true };
+        }),
+    }),
   }),
 });
 
