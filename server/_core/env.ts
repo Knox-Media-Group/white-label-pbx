@@ -12,4 +12,7 @@ export const ENV = {
   telnyxSipConnectionId: process.env.TELNYX_SIP_CONNECTION_ID ?? "",
   // Retell AI
   retellApiKey: process.env.RETELL_API_KEY ?? "",
+  // Admin login
+  adminUsername: process.env.ADMIN_USERNAME ?? "",
+  adminPassword: process.env.ADMIN_PASSWORD ?? "",
 };

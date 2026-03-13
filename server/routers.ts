@@ -54,6 +54,36 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    adminLogin: publicProcedure
+      .input(z.object({
+        username: z.string().min(1),
+        password: z.string().min(1),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { ENV } = await import('./_core/env');
+        if (!ENV.adminUsername || !ENV.adminPassword) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Admin login not configured' });
+        }
+        if (input.username !== ENV.adminUsername || input.password !== ENV.adminPassword) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
+        }
+        const adminOpenId = `admin_local`;
+        await db.upsertUser({
+          openId: adminOpenId,
+          name: 'Admin',
+          email: null,
+          role: 'admin',
+          lastSignedIn: new Date(),
+        });
+        const { sdk } = await import('./_core/sdk');
+        const sessionToken = await sdk.createSessionToken(adminOpenId, {
+          name: 'Admin',
+          expiresInMs: 1000 * 60 * 60 * 24, // 24 hours
+        });
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: 1000 * 60 * 60 * 24 });
+        return { success: true };
+      }),
     portalLogin: publicProcedure
       .input(z.object({
         username: z.string().min(1),

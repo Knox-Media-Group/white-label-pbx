@@ -85,7 +85,7 @@ export default function AdminLayout({
           </div>
           <Button
             onClick={() => {
-              window.location.href = getLoginUrl();
+              setLocation('/');
             }}
             size="lg"
             className="w-full"

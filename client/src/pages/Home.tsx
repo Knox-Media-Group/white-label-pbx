@@ -1,14 +1,29 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Phone, Users, Shield, BarChart3, Settings, Headphones } from "lucide-react";
-import { getLoginUrl } from "@/const";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc";
+import { Phone, Users, Shield, BarChart3, Settings, Headphones, LogIn } from "lucide-react";
 import { useLocation } from "wouter";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function Home() {
   const { user, loading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
+  const [showLogin, setShowLogin] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const adminLogin = trpc.auth.adminLogin.useMutation({
+    onSuccess: () => {
+      window.location.href = "/admin";
+    },
+    onError: (err) => {
+      setError(err.message || "Invalid credentials");
+    },
+  });
 
   // Redirect authenticated users to appropriate dashboard
   useEffect(() => {
@@ -20,6 +35,12 @@ export default function Home() {
       }
     }
   }, [loading, isAuthenticated, user, setLocation]);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    adminLogin.mutate({ username, password });
+  };
 
   const features = [
     {
@@ -71,13 +92,59 @@ export default function Home() {
                 Go to Dashboard
               </Button>
             ) : (
-              <Button asChild>
-                <a href={getLoginUrl()}>Sign In</a>
+              <Button onClick={() => setShowLogin(!showLogin)}>
+                <LogIn className="mr-2 h-4 w-4" />
+                Admin Sign In
               </Button>
             )}
           </div>
         </div>
       </header>
+
+      {/* Admin Login Modal */}
+      {showLogin && !isAuthenticated && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowLogin(false)}>
+          <Card className="w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Phone className="h-5 w-5 text-indigo-600" />
+                Admin Login
+              </CardTitle>
+              <CardDescription>Sign in to the admin dashboard</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
+                  <Input
+                    id="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Username"
+                    autoFocus
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                  />
+                </div>
+                {error && (
+                  <p className="text-sm text-red-600">{error}</p>
+                )}
+                <Button type="submit" className="w-full" disabled={adminLogin.isPending}>
+                  {adminLogin.isPending ? "Signing in..." : "Sign In"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Hero Section */}
       <section className="py-20 md:py-32">
@@ -89,7 +156,7 @@ export default function Home() {
             </h1>
             <p className="mt-6 text-lg text-slate-600 leading-relaxed">
               A comprehensive multi-tenant telephony solution powered by Telnyx.
-              Manage hundreds of customers with isolated PBX environments, automated provisioning, 
+              Manage hundreds of customers with isolated PBX environments, automated provisioning,
               and AI-powered call management features.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -98,8 +165,8 @@ export default function Home() {
                   Go to Dashboard
                 </Button>
               ) : (
-                <Button size="lg" asChild>
-                  <a href={getLoginUrl()}>Get Started</a>
+                <Button size="lg" onClick={() => setShowLogin(true)}>
+                  Get Started
                 </Button>
               )}
               <Button size="lg" variant="outline" onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}>
@@ -144,7 +211,7 @@ export default function Home() {
               <div className="mt-2 text-indigo-200">Customers Supported</div>
             </div>
             <div>
-              <div className="text-4xl font-bold">∞</div>
+              <div className="text-4xl font-bold">&infin;</div>
               <div className="mt-2 text-indigo-200">SIP Endpoints</div>
             </div>
             <div>
