@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Key, Globe } from "lucide-react";
+import { Settings as SettingsIcon, Key, Globe, Bot } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AdminSettings() {
@@ -14,39 +14,74 @@ export default function AdminSettings() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Key className="h-5 w-5" />
-              SignalWire API Configuration
+              Telnyx API Configuration
             </CardTitle>
             <CardDescription>
-              Configure your master SignalWire account credentials for managing subprojects
+              Configure your Telnyx account credentials for managing voice and messaging services
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="grid gap-2">
-                <Label htmlFor="projectId">Project ID</Label>
+                <Label htmlFor="telnyxApiKey">Telnyx API Key</Label>
                 <Input
-                  id="projectId"
-                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  id="telnyxApiKey"
+                  type="password"
+                  placeholder="KEY..."
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="apiToken">API Token</Label>
+                <Label htmlFor="telnyxApiSecret">Telnyx API Secret</Label>
                 <Input
-                  id="apiToken"
+                  id="telnyxApiSecret"
                   type="password"
-                  placeholder="PT..."
+                  placeholder="your-api-secret"
                 />
               </div>
               <div className="grid gap-2 md:col-span-2">
-                <Label htmlFor="spaceUrl">Space URL</Label>
+                <Label htmlFor="telnyxConnectionId">Telnyx SIP Connection ID</Label>
                 <Input
-                  id="spaceUrl"
-                  placeholder="your-space.signalwire.com"
+                  id="telnyxConnectionId"
+                  placeholder="your-sip-connection-id"
                 />
               </div>
             </div>
             <Button onClick={() => toast.info("Feature coming soon")}>
-              Save API Configuration
+              Save Telnyx Configuration
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bot className="h-5 w-5" />
+              Retell.ai Configuration
+            </CardTitle>
+            <CardDescription>
+              Configure your Retell.ai credentials for AI-powered voice agents and call handling
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="retellApiKey">Retell API Key</Label>
+                <Input
+                  id="retellApiKey"
+                  type="password"
+                  placeholder="your-retell-api-key"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="retellAgentId">Default Agent ID</Label>
+                <Input
+                  id="retellAgentId"
+                  placeholder="agent_xxxxxxxxxxxxxxxx"
+                />
+              </div>
+            </div>
+            <Button onClick={() => toast.info("Feature coming soon")}>
+              Save Retell.ai Configuration
             </Button>
           </CardContent>
         </Card>
@@ -72,7 +107,7 @@ export default function AdminSettings() {
                   value={typeof window !== 'undefined' ? `${window.location.origin}/api/webhooks` : ''}
                 />
                 <p className="text-sm text-muted-foreground">
-                  This is your webhook endpoint for SignalWire call events
+                  This is your webhook endpoint for Telnyx and Retell.ai call events
                 </p>
               </div>
             </div>
